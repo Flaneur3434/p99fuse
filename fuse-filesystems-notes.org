@@ -64,8 +64,8 @@ Each of the 12 basic operations falls into 1 of 3 categories:
   |--------+---------------------------|
   | clunk  | release a file            |
   |        |                           |
-*** Meta-data operations
-| stat  | read file attributes   |
-|-------+------------------------|
-| wstat | modify file attributes |
-|       |                        |
++ Meta-data operations
+  | stat  | read file attributes   |
+  |-------+------------------------|
+  | wstat | modify file attributes |
+  |       |                        |
