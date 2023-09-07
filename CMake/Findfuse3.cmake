@@ -8,7 +8,6 @@
 find_path(FUSE3_INCLUDE_DIR
 	NAMES fuse.h
 	PATH_SUFFIXES fuse3)
-message(STATUS ${FUSE3_INCLUDE_DIR})
 
 # find lib
 find_library(FUSE3_LIBRARY

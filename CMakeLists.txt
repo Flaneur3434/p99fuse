@@ -1,12 +1,32 @@
 cmake_minimum_required(VERSION 3.20)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 # check if use g++ unless wagie
 set(CMAKE_CXX_COMPILER "/usr/bin/g++")
-# set(CMAKE_VERBOSE_MAKEFILE ON)
+
+set(CMAKE_VERBOSE_MAKEFILE ON)
+
 # Export the compilation commands to a file
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Create the build directory
+set(BUILD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/build)
+if(NOT EXISTS ${BUILD_DIR})
+    file(MAKE_DIRECTORY ${BUILD_DIR})
+endif()
+
+# Add options to the compilation of source files
+add_compile_options(-Wall -Wextra -Wshadow -Wduplicated-branches -Wswitch-default -Wswitch-enum -Wwrite-strings)
+
 project(p99fuse)
+
+# Create the executable
+add_executable(p99fuse main.cpp)
+
+# Set the output directory for the executable
+set_target_properties(p99fuse PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${BUILD_DIR})
 
 # Linux Fuse header
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/CMake")
@@ -27,22 +47,5 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(liburing4cpp)
 
-# Create the build directory
-set(BUILD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/build)
-if(NOT EXISTS ${BUILD_DIR})
-    file(MAKE_DIRECTORY ${BUILD_DIR})
-endif()
-
-# Add options to the compilation of source files
-add_compile_options(-Wall -Wextra -Werror -Weffc++ -Wshadow -Wstrict-aliasing -Wduplicated-branches -Wfloat-equal -Wswitch-default -Wswitch-enum -Wwrite-strings -Wdangling-else -Wunreachable-code)
-
-# Create the executable
-add_executable(p99fuse main.cpp)
-
-# link to class files
-include_directories(${FUSE3_INCLUDE_DIR})
-target_link_libraries(p99fuse PUBLIC liburing4pp ${FUSE3_LIBRARY})
-
-# Set the output directory for the executable
-set_target_properties(p99fuse PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${BUILD_DIR})
+target_include_directories(p99fuse PUBLIC ${FUSE3_INCLUDE_DIR})
+target_link_libraries(p99fuse PUBLIC liburing4cpp PUBLIC ${FUSE3_LIBRARY})
