@@ -1,5 +1,4 @@
 #include <fuse.h>
-#include <fuse_lowlevel.h>
 #include <string.h>
 #include <errno.h>
 
