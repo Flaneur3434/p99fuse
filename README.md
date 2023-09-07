@@ -1,3 +1,1 @@
-Dependencies:
-fuse
-liburing
+fuse-filesystems-notes.org

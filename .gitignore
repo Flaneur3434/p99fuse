@@ -6,3 +6,4 @@ _deps
 cmake_install.cmake
 .cache
 CMakeFiles
+fuse-filesystems-notes.org

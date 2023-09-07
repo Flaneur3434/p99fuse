@@ -45,6 +45,7 @@ static struct options {
 
 #define OPTION(t, p)                           \
     { t, offsetof(struct options, p), 1 }
+
 static const struct fuse_opt option_spec[] = {
 	OPTION("--name=%s", filename),
 	OPTION("--contents=%s", contents),
