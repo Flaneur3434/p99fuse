@@ -1,0 +1,71 @@
+* Dependencies
+- fuse
+- liburing
+* Why?
+If your operating system doesn't have a native plan9 client service in the kernel (MacOS, OpenBSD, etc.)
+
+In UNIX , networking was an afterthought and UNIX clusters became little more
+than a network of stand-alone systems. Plan 9 was designed from first principles
+as a seamless distributed system with integrated secure network resource
+sharing.
+
+** Alternatives
+NFS
+* Goals
+** Goals of the idea:
+Configuring an environment to use remote application components or services in place of their local equivalent could be achieved with a few simple command line instructions. For the most part, application implementations operated independent of the location of their actual resources.
+** Goals of the project:
+Be fast
+Be simple
+Be secure
+* High Level Overview
+srv(4) initializes the connection to a 9P server
+* Key Words
+** Namespace
+A name space is a mapping of system and application resources to names within a file system hierarchy. Manipulation of the location of the elements within a name space can be used to configure which services to use, to interpose stackable layers onto service interfaces, and to create restricted "sandbox" environments.
+
+Processes inherit an initial name space from their parent, but changes made to the client’s name space are not typically reflected in the parent’s. This allows each process to have a context-specific name space.
+
+Handcrafted name spaces can be used to create secure sandboxes which give users access to very specific system resources. This can be used in much the same way as the UNIX chroot facility - except that the chroot name spaces under Plan 9 can be completely synthetic - with specific executables and interfaces "bound" into place instead of copied to a sub-hierarchy.
+** Mount
+Mount operations allow a client to add new interfaces and resources to their name space
+** Bind
+Bind commands allow reorganization of the existing name space, allowing certain services to be "bound" to well-known locations. Bind operations can also be used to substitute one resource for another, for example by binding a remote device over a local one. Binding can also be used to create stackable layers, by interposing one interface over another.
+** 9P2000
+9P2000 is the most recent version of 9P, the Plan 9 distributed resource protocol. It is a typical client/server protocol with request/response semantics for each operation (or transaction). 9P can be used over any reliable, in-order transport. While the most common usage is over pipes on the same machine or over TCP/IP to remote machines.
+** Internet Link (IL) protocol
+A lightweight encapsulation designed specifically for 9P. The IL protocol was designed specifically to provide 9P with a reliable, in order transport on top of an IP stack without the overhead of TCP.
+** T message / R message
+T messages are requests from the client to the server
+R messages are responses from the server to the client
+* 9P2000 Protocal
+9P has 12 basic operations, all of which are initiated by the clients. Each request (or T-message) is satisfied by a single associated response (or R-message). In the case of an error, a special response (R-error) is returned to the client containing a variable length string error message.
+
+Each of the 12 basic operations falls into 1 of 3 categories:
++ Session management
+  | auth   | security authentication |
+  |--------+-------------------------|
+  | attach | establish a connection  |
+  |--------+-------------------------|
+  | flush  | abort a request         |
+  |--------+-------------------------|
+  | error  | return an error         |
+  |        |                         |
++ File operations
+  | walk   | lookup pathname           |
+  |--------+---------------------------|
+  | open   | access a file             |
+  |--------+---------------------------|
+  | create | create & access a file    |
+  |--------+---------------------------|
+  | read   | transfer data from a file |
+  |--------+---------------------------|
+  | write  | transfer data to a file   |
+  |--------+---------------------------|
+  | clunk  | release a file            |
+  |        |                           |
+*** Meta-data operations
+| stat  | read file attributes   |
+|-------+------------------------|
+| wstat | modify file attributes |
+|       |                        |
