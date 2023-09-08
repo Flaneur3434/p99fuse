@@ -1,3 +1,5 @@
+* Description
+Mounts a 9p service onto local system via FUSE. Uses 9P2000.L protocal.
 * Dependencies
 - fuse
 - liburing
@@ -39,33 +41,125 @@ A lightweight encapsulation designed specifically for 9P. The IL protocol was de
 T messages are requests from the client to the server
 R messages are responses from the server to the client
 * 9P2000 Protocal
-9P has 12 basic operations, all of which are initiated by the clients. Each request (or T-message) is satisfied by a single associated response (or R-message). In the case of an error, a special response (R-error) is returned to the client containing a variable length string error message.
+9P has 13 basic operations, all of which are initiated by the clients. Each request (or T-message) is satisfied by a single associated response (or R-message). In the case of an error, a special response (R-error) is returned to the client containing a variable length string error message.
 
-Each of the 12 basic operations falls into 1 of 3 categories:
+Each of the 13 basic operations falls into 1 of 3 categories:
 + Session management
-  | auth   | security authentication |
-  |--------+-------------------------|
-  | attach | establish a connection  |
-  |--------+-------------------------|
-  | flush  | abort a request         |
-  |--------+-------------------------|
-  | error  | return an error         |
-  |        |                         |
+  | version | parameter negotiation   |
+  |---------+-------------------------|
+  | auth    | security authentication |
+  |---------+-------------------------|
+  | attach  | establish a connection  |
+  |---------+-------------------------|
+  | flush   | abort a request         |
+  |---------+-------------------------|
+  | error   | return an error         |
 + File operations
-  | walk   | lookup pathname           |
-  |--------+---------------------------|
-  | open   | access a file             |
-  |--------+---------------------------|
-  | create | create & access a file    |
-  |--------+---------------------------|
-  | read   | transfer data from a file |
-  |--------+---------------------------|
-  | write  | transfer data to a file   |
-  |--------+---------------------------|
-  | clunk  | release a file            |
-  |        |                           |
+  | walk   | lookup pathname             |
+  |--------+-----------------------------|
+  | open   | access a file               |
+  |--------+-----------------------------|
+  | create | create & access a file      |
+  |--------+-----------------------------|
+  | read   | transfer data from a file   |
+  |--------+-----------------------------|
+  | write  | transfer data to a file     |
+  |--------+-----------------------------|
+  | clunk  | release a file              |
+  |--------+-----------------------------|
+  | remove | remove a file system object |
 + Meta-data operations
   | stat  | read file attributes   |
   |-------+------------------------|
   | wstat | modify file attributes |
-  |       |                        |
++ 9P2000.L Operations
+  | lerror      | return error code                           |
+  |-------------+---------------------------------------------|
+  | statfs      | get file system information                 |
+  |-------------+---------------------------------------------|
+  | lopen       | open a file (linux open flags)              |
+  |-------------+---------------------------------------------|
+  | lcreate     | create regular file (linux creat mode bits) |
+  |-------------+---------------------------------------------|
+  | symlink     | create symbolic link                        |
+  |-------------+---------------------------------------------|
+  | mknod       | create a device node                        |
+  |-------------+---------------------------------------------|
+  | rename      | rename a file                               |
+  |-------------+---------------------------------------------|
+  | read link   | read value of symbolic link                 |
+  |-------------+---------------------------------------------|
+  | getattr     | get file attributes                         |
+  |-------------+---------------------------------------------|
+  | setattr     | set file attributes                         |
+  |-------------+---------------------------------------------|
+  | xattrwalk   | prepare to read/list extended attributes    |
+  |-------------+---------------------------------------------|
+  | xattrcreate | prepare to set extended attribute           |
+  |-------------+---------------------------------------------|
+  | readdir     | read a directory                            |
+  |-------------+---------------------------------------------|
+  | fsync       | flush any cached data to disk               |
+  |-------------+---------------------------------------------|
+  | lock        | acquire or release a POSIX record lock      |
+  |-------------+---------------------------------------------|
+  | getlock     | test for the existence of POSIX record lock |
+  |-------------+---------------------------------------------|
+  | link        | create hard link                            |
+  |-------------+---------------------------------------------|
+  | mkdir       | create directory                            |
+  |-------------+---------------------------------------------|
+  | renameat    | rename a file or directory                  |
+  |-------------+---------------------------------------------|
+  | unlinkat    | unlink a file or directory                  |
+** Examples of messages between client and server using 9P2000
+(https://www.usenix.org/legacy/events/usenix05/tech/freenix/full_papers/hensbergen/hensbergen_html/index.html)
+#+BEGIN_SRC -n
+-> Tversion tag -1 msize 8216 version '9P2000'
+<- Rversion tag -1 msize 8216 version '9P200'
+#+END_SRC
+The version operation initiates the protocol session. The tag accompanies all protocol messages and is used to multiplex operations on a single connection. The client selects a unique tag for each outbound operation. The tag for version operations, however, is always set to -1. The next field, msize negotiates the maximum packet size with the server including any headers - the server may respond with any number less than or equal to the requested size. The version field is a variable length string representing the requested version of the protocol to use. The server may respond with an earlier version, or with an error if there is no earlier version that it can support.
+#+BEGIN_SRC +n
+-> Tauth tag 5 afid 291 uname 'bootes' aname ''
+<- Rerror tag 5 ename 'u9fs authnone: no authentication required'
+#+END_SRC
+The auth operation is used to negotiate authentication information. The afid represents a special authentication handle, the uname (bootes) is the user name attempting the connection and the aname, (which in this case is blank), is the mount point the user is trying to authenticate against.
+
+A blank aname specifies that the root of the file server’s hierarchy is to be mounted. In this case, the Plan 9 client is attempting to connect to a Unix server which does not require authentication, so instead of returning an Rauth operation validating the authentication, the server returns Rerror, and in a variable length strength in the field ename, the server returns the reason for the error.
+#+BEGIN_SRC +n
+-> Tattach tag 5 fid 291 afid -1 uname 'bootes' anme ''
+<- Rattach tag 5 qid (0902 1097266316 d)
+#+END_SRC
+The attach operation is used to establish a connection with the file server. A fid unique identifier is selected by the client to be used as a file handle. A Fid is used as the point of reference for almost all 9P operations. They operate much like a UNIX file descriptor, except that they can reference a position in a file hierarchy as well as referencing open files. In this case, the fid returned references the root of the server’s hierarchy. The afid is an authentication handle; in this case it is set to -1 because no authentication was used. Uname and aname serve the same purposes as described before in the auth operation.
+
+The response to the attach includes a qid, which is a tuple representing the server’s unique identifier for the file. The first number in the tuple represents the qid.path, which can be thought of as an inode number representing the file. Each file or directory in a file server’s hierarchy has exactly one qid.path. The second number represents the qid.version, which is used to provide a revision for the file in question. Synthetic files by convention have a qid.version of 0. Qid.version numbers from UNIX file servers are typically a hash of the file’s modification time. The final field, qid.type, encodes the type of the file. Valid types include directories, append only files (logs), exclusive files (only one client can open at a time), mount points (pipes), authentication files, and normal files.
+#+BEGIN_SRC +n
+-> Twalk tag 5 fid 291 newfid 308 nwname 0
+<- Rwalk tag 5 nwqid 0
+#+END_SRC
+Walk operations serve two purposes: directory traversal and fid cloning. This walk demonstrates the latter. Before any operation can proceed, the root file handle (or fid) must be cloned. A clone operation can be thought of as a dup, in that it makes a copy of an existing file handle - both of which initially point to the same location in the file hierarchy. The cloned file handle can then be used to traverse the file tree or to perform various operations. In this case the root fid (291) is cloned to a new fid (308). Note that the client always selects the fid numbers. The last field in the request transaction, nwname, is used for traversal operations. In this case, no traversal was requested, so it is set to 0. The nwqid field in the response is for traversals and is discussed in the next segment.
+#+BEGIN_SRC +n
+-> Twalk tag 5 fid 308 newfid 296 nwname 2 0:tmp 1:usr
+<- Rwalk tag 5 nwqid 2 0:(0034901 1093689656 d) 1:(0074cdd0 1096825323 d)
+#+END_SRC
+Here we see a traversal request walk operation. All traversals also contain a clone operation. The fid and newfid fields serve the same purpose as described previously. Nwname specifies the number of path segments which are attempting to be traversed (in this case 2). The rest of the operands are numbered variable length strings representing the path segments - in this case, traversing to /tmp/usr. The nwqid in the response returns the qids for each segment traversed, and should have a qid for each requested path segment in the request. Note that in this case there are two pathname components: the path name is walked at the server, not the client, which is a real performance improvement over systems such as NFS which walk pathnames one component at a time.
+#+BEGIN_SRC +n
+-> Tcreate tag 5 fid 296 perm --rw-rw-rw- mode 1 name 'testfile'
+<- Rcreate tag 5 qid (074cdd4 1097874034 ) iounit 0
+#+END_SRC
+The create operation both creates a new file and opens it. The open operation has similar arguments, but doesn’t include the name or perm fields. The name field is a variable length string representing the file name to be created. The perm field specifies the user, group, and other permissions on the file (read, write, and execute). These are similar to the core permissions on a unix system. The mode bit represents the mode with which you want to open the resulting file (read, write, and/or execute). The response contains the qid of the newly created (or opened) file and the iounit, which specifies the maximum number of bytes which may be read or written before the transaction is split into multiple 9P messages. In this case, a response of 0 indicates that the file’s maximum message size matches the session’s maximum message size (as specified in the version operation).
+#+BEGIN_SRC +n
+-> Tclunk tag 5 fid 308
+<- Rclunk tag 5
+#+END_SRC
+The clunk operation is sent to release a file handle. In this case it is releasing the cloned handle to the root of the tree. You’ll often see transient fids used for traversals and then discarded. This is even more extreme in the UNIX clients as they only traverse a single path segment at a time, generating a new fid for each path segment. These transient fids are a likely candidate for optimization, and may be vestigial from the older 9P specification which had a separate clone operation and didn’t allow multiple segment walks.
+#+BEGIN_SRC +n
+-> Twrite tag 5 fid 296 offset 0 count 8 ’test’
+<- Rwrite tag 5 count 8
+#+END_SRC
+We finally come to an actual I/O operation, a write operation that writes the string ’test’ into the new file. Write and read operands are very similar and straightforward. The offset field specifies the offset into the file to perform the operation. There is no separate seek operation in 9P. The count represents the number of bytes to read or write, and the variable length string (’test’) is the value to be written. The response count reports the number of bytes successfully written. In a read operation the response would also contain a variable length string of count size with the data read.
+#+BEGIN_SRC +n
+-> Tclunk tag 5 fid 296
+<- Rclunk tag 5
+#+END_SRC
+This final clunk releases the fid handle to the file -- approximating a close operation. You’ll note that the only fid remaining open is the root fid which remains until the file system is unmounted. Several operations were not covered in this transaction summary. Flush is almost never used by clients in normal operation, and is typically used to recover from error cases. The stat operation, similar to its UNIX counterpart, is used to retrieve file metadata. Twstat is used to set file metadata, and is also used to rename files (file names are considered part of the metadata).
