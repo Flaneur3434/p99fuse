@@ -1,3 +1,4 @@
+#include <netdb.h>
 #include "plan9.h"
 #include "fcall.h"
 #include "9fs.h"

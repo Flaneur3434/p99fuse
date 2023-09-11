@@ -88,11 +88,9 @@ extern int chatty9p;
 
 static	int	convT2M(Ticket*, char*, char*);
 static	void	convM2T(char*, Ticket*, char*);
-static	void	convM2Tnoenc(char*, Ticket*);
 static	int	convA2M(Authenticator*, char*, char*);
 static	void	convM2A(char*, Authenticator*, char*);
 static	int	convTR2M(Ticketreq*, char*);
-static	void	convM2TR(char*, Ticketreq*);
 static	int	passtokey(char*, char*);
 
 /*
@@ -189,7 +187,7 @@ convT2M(Ticket *f, char *ap, char *key)
 	return n;
 }
 
-int
+static int
 convA2M(Authenticator *f, char *ap, char *key)
 {
 	int n;
@@ -217,7 +215,7 @@ convA2M(Authenticator *f, char *ap, char *key)
 #define	LONG(x)		VLONG(f->x)
 #define	STRING(x,n)	memmove(f->x, p, n); p += n
 
-void
+static void
 convM2A(char *ap, Authenticator *f, char *key)
 {
 	uchar *p;
@@ -231,7 +229,7 @@ convM2A(char *ap, Authenticator *f, char *key)
 	USED(p);
 }
 
-void
+static void
 convM2T(char *ap, Ticket *f, char *key)
 {
 	uchar *p;

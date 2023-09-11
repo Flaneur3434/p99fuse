@@ -17,6 +17,7 @@ extern char *autharg;
 extern Auth authp9any;
 extern Auth authrhosts;
 extern Auth authnone;
+extern Auth authssh2;
 
 extern ulong truerand(void);
 extern void randombytes(uchar*, uint);

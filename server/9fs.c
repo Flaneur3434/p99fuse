@@ -156,6 +156,7 @@ Auth *authmethods[] = {	/* first is default */
 	&authrhosts,
 	&authp9any,
 	&authnone,
+	&authssh2,
 };
 
 Auth *auth;
