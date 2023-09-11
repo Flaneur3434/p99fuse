@@ -147,7 +147,7 @@ char	hostname[256];
 char	remotehostname[256];
 int	chatty9p = 0;
 int	network = 1;
-int	old9p = -1;
+int	old9p = 0;
 int	authed;
 char*	root;
 User*	none;
@@ -1650,7 +1650,7 @@ usercreate(Fid *fid, char *elem, int omode, long perm, char **ep)
 			return -1;
 		}
 		/* race */
-		if(mkdir(npath, perm&0777) < 0){
+		if(mkdir(npath, perm&0777|0400) < 0){
 			*ep = strerror(errno);
 			free(npath);
 			return -1;

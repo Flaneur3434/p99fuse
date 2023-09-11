@@ -13,11 +13,9 @@
 #include <stdio.h>
 
 extern int chatty9p;
-char *af;
 uint32_t hostaddr;
 const char *username;
 libssh2_socket_t sock;
-int i;
 struct sockaddr_in sin_;
 const char *fingerprint;
 char *userauthlist;
@@ -33,10 +31,53 @@ static void shutdown_ssh2(void);
  * Parse autharg
  * Ex: john@192.168.1.43:/mnt/9
  */
+struct Username {
+	const char *uname;
+	uint8_t len;
+};
+
+struct Address {
+	const char *addr;
+	uint8_t len;
+};
+
+struct MountPoint {
+	const char *mtpt;
+	uint8_t len;
+};
+
+struct Username uname;
+struct Address addr;
+struct MountPoint mtpt;
+
 static void
 ssh2init(void) {
-	af = autharg; //ssh arguments
-	printf( "parsing %s\n", af);
+	size_t arg_len = strlen(autharg); //ssh arguments
+	size_t i = 0;
+
+	/* get username */
+	uname.uname = autharg;
+	for(; i < arg_len; ++i) {
+		if (autharg[i] == '@') {
+			uname.len = i;
+			break;
+		}
+	}
+
+	/* get address */
+	i += 1; // move to next char
+	addr.addr = autharg + i;
+	for(; i < arg_len; ++i){
+		if (autharg[i] == ':') {
+			addr.len = i - uname.len - 1; // dont count '@'
+			break;
+		}
+	}
+
+	/* get mount point */
+	i += 1; // move to next char
+	mtpt.mtpt = autharg + i;
+	mtpt.len = arg_len - (uname.len + addr.len) - 2; // dont count '@' and ':'
 }
 
 /*
@@ -52,9 +93,9 @@ ssh2auth(Fcall *rx, Fcall *tx)
 		fprint(2, "ssh2auth: afid %d\n", rx->afid);
 	}
 
-
-
-	hostaddr = inet_addr(remotehostname);
+	char ip_addr[addr.len];
+	strncpy(ip_addr, addr.addr, addr.len);
+	hostaddr = inet_addr(ip_addr);
 	username = rx->uname;
 	rc = libssh2_init(0);
 
@@ -103,7 +144,7 @@ ssh2auth(Fcall *rx, Fcall *tx)
     fingerprint = libssh2_hostkey_hash(session, LIBSSH2_HOSTKEY_HASH_SHA1);
     fprintf(stderr, "Fingerprint: ");
 
-    for(i = 0; i < 20; i++) {
+    for(int i = 0; i < 20; i++) {
         fprintf(stderr, "%02X ", (unsigned char)fingerprint[i]);
     }
 
@@ -175,7 +216,7 @@ ssh2auth(Fcall *rx, Fcall *tx)
 	shutdown_ssh2(); return 0;
 }
 
-static void shutdown_ssh2(void) {
+static inline void shutdown_ssh2(void) {
 	if(agent) {
         libssh2_agent_disconnect(agent);
         libssh2_agent_free(agent);
@@ -205,7 +246,7 @@ ssh2attach(Fcall *rx, Fcall *tx)
 {
 	USED(rx);
 	USED(tx);
-	return "u9fs rhostsauth: no authentication required";
+	return "nil";
 }
 
 Auth authssh2 = {

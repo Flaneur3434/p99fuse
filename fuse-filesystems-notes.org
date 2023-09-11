@@ -1,13 +1,20 @@
 * Description
-Mounts a 9p service onto local system via FUSE. Uses 9P2000.L protocal.
-Has no server capabilities.
-There are other tools for that.
+Utilities to interact with filesystems that use 9P2000 file protocal.
+
+9srv executable serves directories
+9fs executable mounts remote (or local) directories using fuse
+9exe executable executes remote commands on local exported directory
 * Dependencies
 - fuse
 - liburing
 * Build
 #+BEGIN_SRC
 cmake . -DBUILD_SHARED_LIBS=OFF -B build/
+#+END_SRC
+* Run
+#+BEGIN_SRC
+socat TCP4-LISTEN:5640,range=192.168.1.1/8 EXEC:"./9srv -a none -u john /home/john/Documents"
+./9fs -d -p 5640 192.168.1.43 /mnt/test9
 #+END_SRC
 * Why?
 If your operating system doesn't have a native plan9 client service in the kernel (MacOS, OpenBSD, etc.)

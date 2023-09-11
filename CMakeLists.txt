@@ -17,16 +17,7 @@ endif()
 project(9bind)
 
 add_subdirectory(server)
-
-# Linux Fuse header
-# set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/CMake")
-# find_package(fuse3 REQUIRED)
-# if(FUSE3_FOUND)
-#   message(STATUS "fuse ver ${FUSE3_MOUNT_VERSION} library found: ${FUSE3_LIBRARY}")
-#   message(STATUS "fuse ver ${FUSE3_MOUNT_VERSION} include path found: ${FUSE3_INCLUDE_DIR}")
-# else()
-#   message(FATAL_ERROR "fuse library not found")
-# endif()
+add_subdirectory(client)
 
 # include(FetchContent)
 # FetchContent_Declare(
