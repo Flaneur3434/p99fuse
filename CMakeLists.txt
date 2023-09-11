@@ -19,13 +19,13 @@ endif()
 # Add options to the compilation of source files
 add_compile_options(-Wall -Wextra -Wshadow -Wduplicated-branches -Wswitch-default -Wswitch-enum -Wwrite-strings)
 
-project(p99fuse)
+project(9bind)
 
 # Create the executable
-add_executable(p99fuse main.cpp)
+add_executable(9bind main.cpp)
 
 # Set the output directory for the executable
-set_target_properties(p99fuse PROPERTIES
+set_target_properties(9bind PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${BUILD_DIR})
 
 # Linux Fuse header
@@ -38,14 +38,21 @@ else()
   message(FATAL_ERROR "fuse library not found")
 endif()
 
-# C++ io_uring Library
 include(FetchContent)
 FetchContent_Declare(
     liburing4cpp
     GIT_REPOSITORY https://github.com/CarterLi/liburing4cpp.git
-    GIT_TAG        async
+    GIT_TAG async
+	FIND_PACKAGE_ARGS # use find_package() before trying to download source
 )
-FetchContent_MakeAvailable(liburing4cpp)
 
-target_include_directories(p99fuse PUBLIC ${FUSE3_INCLUDE_DIR})
-target_link_libraries(p99fuse PUBLIC liburing4cpp PUBLIC ${FUSE3_LIBRARY})
+FetchContent_Declare(
+	libssh2
+	GIT_REPOSITORY https://github.com/libssh2/libssh2.git
+	GIT_TAG master
+	FIND_PACKAGE_ARGS # use find_package() before trying to download source
+)
+
+FetchContent_MakeAvailable(liburing4cpp libssh2)
+target_include_directories(9bind PUBLIC ${FUSE3_INCLUDE_DIR})
+target_link_libraries(9bind PUBLIC liburing4cpp PUBLIC libssh2 PUBLIC ${FUSE3_LIBRARY})

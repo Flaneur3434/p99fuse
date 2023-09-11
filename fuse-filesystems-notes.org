@@ -1,8 +1,14 @@
 * Description
 Mounts a 9p service onto local system via FUSE. Uses 9P2000.L protocal.
+Has no server capabilities.
+There are other tools for that.
 * Dependencies
 - fuse
 - liburing
+* Build
+#+BEGIN_SRC
+cmake . -DBUILD_SHARED_LIBS=OFF -B build/
+#+END_SRC
 * Why?
 If your operating system doesn't have a native plan9 client service in the kernel (MacOS, OpenBSD, etc.)
 
@@ -21,7 +27,40 @@ Be fast
 Be simple
 Be secure
 * High Level Overview
-srv(4) initializes the connection to a 9P server
+#+begin_ascii
+|> 9bind ken_nc@192.168.1.43:~/test /mnt/9
+|> cd /mnt/9
+|> which bear
+|> which: no bear in (...)
+|> 9which bear
+|> ken_nc@gentoo_box:/usr/bin/bear
+|> 9exe ken_nc which bear
+|> /usr/bin/bear
+|> 9exe ken_nc bear -- make -k
+#+end_ascii
+Local machine doesnt have the bear installed, so use remote bear executable on local files.
+9which is a program that uses 9P to print the full path of a remote or local executable.
+If an executable is on a remote machine, print the ip address or service name.
+9exe is a program that takes stdin and executes it on remote machine and stdouts the result
+#+begin_ascii
+|> 9bind ken_nc@192.168.1.43:~/programming/git-repo /mnt/9
+|> cd /mnt/9
+|> emacsclient -c ./main.cc
+|> 9exe ken_nc git add -v .
+|> 9exe ken_nc git commit -m "Feels good man"
+|> 9exe ken_nc git push origin main
+#+end_ascii
+Edit a remote file and git add, commit, push using remote git executable and settings.
+#+begin_ascii
+|> 9bind /mnt/class-notes john@192.168.1.52:~/Documents/cs101-notes
+|> 9bind /mnt/class-notes zacc@zacc-cafe.jp:~/cs101-jefferson-notes
+|> 9bind /mnt/class-notes ~/Documents/my-class-notes
+|> cd /mnt/class-notes
+|> touch thursday-notes
+|> 9exe john ls
+|> 9exe zacc cat jefferson_9-27-23.notes
+#+end_ascii
+Merging directories.
 * Key Words
 ** Namespace
 A name space is a mapping of system and application resources to names within a file system hierarchy. Manipulation of the location of the elements within a name space can be used to configure which services to use, to interpose stackable layers onto service interfaces, and to create restricted "sandbox" environments.
