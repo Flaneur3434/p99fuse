@@ -1,9 +1,13 @@
 * Description
 Utilities to interact with filesystems that use 9P2000 file protocal.
-
-9srv executable serves directories
-9fs executable mounts remote (or local) directories using fuse
-9exe executable executes remote commands on local exported directory
+** 9srv
+executable serves directories
+** 9fs
+executable mounts remote (or local) directories using fuse
+** tlsclient
+https://man.9front.org/8/tlssrv
+** 9exe
+executable executes remote commands on local exported directory
 * Dependencies
 - fuse
 - liburing

@@ -20,7 +20,7 @@
 #include "plan9.h"
 #include "fcall.h"
 #include "oldfcall.h"
-#include "9fs.h"
+#include "u9fs.h"
 
 
 /* #ifndef because can be given in makefile */

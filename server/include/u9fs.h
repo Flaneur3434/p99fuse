@@ -1,3 +1,8 @@
+#pragma once
+
+#include "plan9.h"
+#include "fcall.h"
+
 typedef struct Auth Auth;
 struct Auth {
 	char *name;

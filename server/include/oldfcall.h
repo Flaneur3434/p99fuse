@@ -1,3 +1,5 @@
+#pragma once
+
 uint	convM2Dold(uchar*, uint, Dir*, char*);
 uint	convD2Mold(Dir*, uchar*, uint);
 uint	sizeD2Mold(Dir*);

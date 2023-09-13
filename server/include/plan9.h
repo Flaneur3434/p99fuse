@@ -1,3 +1,5 @@
+#pragma once
+
 /* magic to get 64-bit pread/pwrite */
 #define _LARGEFILE64_SOURCE
 /* magic to get 64-bit stat on Linux, maybe others */

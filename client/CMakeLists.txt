@@ -1,15 +1,15 @@
-project(9fs)
+project(9fuse)
 
 # Create the executable
-add_executable(9fs 9p.c 9pfs.c util.c)
+add_executable(9fuse 9p.c 9pfs.c util.c)
 
-set_property(TARGET 9fs PROPERTY C_STANDARD 11)
+set_property(TARGET 9fuse PROPERTY C_STANDARD 11)
 
 # Add options to the compilation of source files
-target_compile_options(9fs PUBLIC -Wall -Wextra -Wshadow -Wduplicated-branches -Wswitch-default -Wswitch-enum -Wwrite-strings -Wno-missing-braces)
+target_compile_options(9fuse PUBLIC -Wall -Wextra -Wshadow -Wduplicated-branches -Wswitch-default -Wswitch-enum -Wwrite-strings -Wno-missing-braces)
 
 # Set the output directory for the executable
-set_target_properties(9fs PROPERTIES
+set_target_properties(9fuse PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${BUILD_DIR})
 
 # Linux Fuse header
@@ -24,6 +24,6 @@ endif()
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/lib)
 
-target_include_directories(9fs PUBLIC ${FUSE3_INCLUDE_DIR} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(9fs PUBLIC ${FUSE3_LIBRARY} lib)
-target_compile_definitions(9fs PUBLIC FUSE_USE_VERSION=30)
+target_include_directories(9fuse PUBLIC ${FUSE3_INCLUDE_DIR} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(9fuse PUBLIC ${FUSE3_LIBRARY} lib)
+target_compile_definitions(9fuse PUBLIC FUSE_USE_VERSION=30)

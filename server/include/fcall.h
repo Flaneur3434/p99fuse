@@ -1,3 +1,7 @@
+#pragma once
+
+#include "plan9.h"
+
 #define	VERSION9P	"9P2000"
 #define	MAXWELEM	16
 

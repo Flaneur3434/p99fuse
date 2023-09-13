@@ -30,3 +30,7 @@ getremotehostname(char *name, int nname)
 	on = 1;
 	setsockopt(0, IPPROTO_TCP, TCP_NODELAY, (char*)&on, sizeof(on));
 }
+
+void getremotehoststat() {
+
+}

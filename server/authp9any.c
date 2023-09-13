@@ -7,7 +7,7 @@
 
 #include "plan9.h"
 #include "fcall.h"
-#include "9fs.h"
+#include "u9fs.h"
 
 typedef struct	Ticket		Ticket;
 typedef struct	Ticketreq	Ticketreq;
