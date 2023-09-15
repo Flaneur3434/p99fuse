@@ -1,1 +1,12 @@
-fuse-filesystems-notes.org
+* What is this
+Added ssh authentication support to 9pfs and u9fs
+* Dependencies
+** libssh2
+Client-side C library implementing the SSH2 protocol
+https://github.com/libssh2/libssh2
+* Original Projects
+** 9pfs
+A fork of a fork of a abandoned project
+https://github.com/bunny351/9pfs
+** u9fs
+https://github.com/sevki/u9fs

@@ -564,8 +564,6 @@ main(int argc, char *argv[])
 
 			auth_freeS2I(s2i);
 		}
-
-
 	}
 	rootfid = _9pattach(ROOTFID, doauth ? AUTHFID : NOFID, user, aname);
 	if((rootdir = _9pstat(rootfid)) == NULL)
