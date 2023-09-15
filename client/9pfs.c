@@ -462,12 +462,11 @@ struct fuse_operations fsops = {
 int
 main(int argc, char *argv[])
 {
-	AuthInfo		*ai;
 	struct sockaddr_un	uaddr;
 	struct sockaddr		*addr;
 	struct addrinfo		*ainfo;
 	struct passwd		*pw;
-	char			logstr[100], *fusearg[argc], **fargp, port[10], user[30], *aname;
+	char			logstr[100], *fusearg[argc], **fargp, port[10], user[30], *aname, *auth_method;
 	int			ch, doauth, uflag, n, alen, e;
 
 	fargp = fusearg;
@@ -479,7 +478,7 @@ main(int argc, char *argv[])
 	if((pw = getpwuid(getuid())) == NULL)
 		errx(1, "Could not get user");
 	strecpy(user, user+sizeof(user), pw->pw_name);
-	while((ch = getopt(argc, argv, ":dnUap:u:A:o:f")) != -1){
+	while((ch = getopt(argc, argv, ":dnUa:p:u:A:o:f")) != -1){
 		switch(ch){
 		case 'd':
 			debug++;
@@ -491,6 +490,7 @@ main(int argc, char *argv[])
 			uflag++;
 			break;
 		case 'a':
+			auth_method = strdup(optarg);
 			doauth++;
 			break;
 		case 'f':
@@ -549,16 +549,32 @@ main(int argc, char *argv[])
 	msize = _9pversion(Msize);
 	if(doauth){
 		authfid = _9pauth(AUTHFID, user, NULL);
-		ai = auth_proxy(authfid, auth_getkey, "proto=p9any role=client");
-		if(ai == NULL)
-			err(1, "Could not establish authentication");
-		auth_freeAI(ai);
+		if (strcmp(auth_method, "factotum")) {
+				AuthInfo *ai = auth_proxy(authfid, auth_getkey, "proto=p9any role=client");
+			if(ai == NULL) {
+				err(1, "Could not establish authentication with factomum");
+			}
+
+			auth_freeAI(ai);
+		} else if (strcmp(auth_method, "ssh2")) {
+			SSH2Info *s2i = auth_ssh2(authfid, );
+			if (s2i == NULL) {
+				err(1, "Could not establish authentication with ssh2");
+			}
+
+			auth_freeS2I(s2i);
+		}
+
+
 	}
 	rootfid = _9pattach(ROOTFID, doauth ? AUTHFID : NOFID, user, aname);
 	if((rootdir = _9pstat(rootfid)) == NULL)
 		errx(1, "Could not stat root");
 	DPRINT("About to fuse_main\n");
 	fuse_main(fargp - fusearg, fusearg, &fsops, NULL);
+
+	free(aname);
+	free(auth_method);
 	exit(0);
 }
 

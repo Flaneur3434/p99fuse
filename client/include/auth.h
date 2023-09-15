@@ -35,7 +35,7 @@ struct AuthInfo
 	char	*cuid;		/* caller id */
 	char	*suid;		/* server id */
 	char	*cap;		/* capability (only valid on server side) */
-	int	nsecret;	/* length of secret */
+	int	nsecret;	    /* length of secret */
 	uchar	*secret;	/* secret */
 };
 

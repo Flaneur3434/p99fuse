@@ -8,6 +8,36 @@
 #include <string.h>
 #include <stdio.h>
 
+/*
+ * How does this work?
+ *
+ * u9fs (9p file server ) creates a connection to sshd in auth.init
+ * 9fuse (9p client) sends a auth message to u9fs so it can mount a filesystem served by u9fs
+ *
+ * u9fs acts as a proxy to the sshd
+ * u9fs recieves information sshd needs to authenticate the connection via the afd (returned by fauth)
+ * this creates a dependency between u9fs and sshd authentication
+ * if sshd authentication fails u9fs authentication also fails
+ *
+ *
+ * step 1) 9fuse writes to afd -> u9fs recieves and passes info onto sshd
+ * step 2) u9fs writes to afd a challenge recieved from sshd -> 9fuse recieves
+ * step 3) 9fuse forwards challege to ssh agent -> ssh agent generates response -> hands it back to 9fuse
+ * step 3) 9fuse writes to afd -> u9fs recieves the afd
+ *         and passes information onto sshd
+ * step 4) sshd validates the key response -> u9fs validates the 9fuse client -> exported root filesystem attaches to client
+ *
+ *
+ * why use agent?
+ * Proceeding connections to u9fs can be authenticated by the sshd (located on
+ * server machine) and ssh agent (located on client machine) without user intervention
+ *
+ * If user wanted to use 9exe, they would be prompted to type in thier password
+ * each time 9exe executes a remote command
+ * With a ssh agent, they dont need too
+ */
+
+
 extern int chatty9p;
 
 static AuthArgs auth_args;
