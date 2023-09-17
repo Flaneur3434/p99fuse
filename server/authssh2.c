@@ -16,12 +16,12 @@ extern int chatty9p;
 
 enum ClientMessageStatus {
 	ServerInfo = 24,
-	ServerStatus,
+	ServerStatus = 54,
 };
 
 enum SshServerStatus {
-	SUCC,
-	FAIL,
+	SUCC = 0,
+	FAIL = -1,
 };
 
 typedef struct Ssh2Session Ssh2Session;
@@ -68,24 +68,26 @@ ssh2auth(Fcall *rx, Fcall *tx) {
 	}
 
 	sp->cli_mesg_state = ServerInfo;
-	// test
-	char *ip = "192.168.1.43";
-	char *port = "5640";
-	//tset
-	memcpy(sp->server_ip, ip, strlen(ip) + 1);
-	memcpy(sp->server_port, port, strlen(port) + 1);
+
 	tx->aqid.type = QTAUTH;
 	tx->aqid.path = 1;
 	tx->aqid.vers = 0;
 	return 0;
 }
 
-static char*
-ssh2attach(Fcall *rx, Fcall *tx)
+static int
+readstr(Fcall *rx, Fcall *tx, char *s, int len)
 {
-	USED(rx);
-	USED(tx);
-	return 0;
+	if (rx->offset >= len) {
+		return 0;
+	}
+
+	tx->count = len - rx->offset;
+	if (tx->count > rx->count) {
+		tx->count = rx->count;
+	}
+	memcpy(tx->data, s + rx->offset, tx->count);
+	return tx->count;
 }
 
 static char *
@@ -95,10 +97,69 @@ ssh2read(Fcall *rx, Fcall *tx) {
 
 	Fid *f;
 	f = oldauthfid(rx->fid, (void **)&sp, &ep);
-	if (f == nil)
+	if (f == nil) {
 		return ep;
+	}
 	if (chatty9p) {
-		fprint(2, "p9anyread: afid %d state %d\n", rx->fid, sp->cli_mesg_state);
+		fprint(2, "ssh2read: afid %d state %d\n", rx->fid, sp->cli_mesg_state);
+	}
+
+
+	// test data
+	char *ip = "192.168.1.43";
+	char *port = "5640";
+	// atad tset
+
+	switch(sp->cli_mesg_state) {
+	case ServerInfo:
+			memcpy(sp->server_ip, ip, strlen(ip) + 1);
+			memcpy(sp->server_port, port, strlen(port) + 1);
+
+			// send ip and port as one string
+			// sprintf
+
+			readstr(rx, tx, sp->server_ip, strlen(sp->server_ip) + 1);
+
+			sp->cli_mesg_state = ServerStatus;
+			break;
+	default:
+		return "invalid state detected when returning server info";
+	}
+
+	return 0;
+}
+
+static char*
+ssh2attach(Fcall *rx, Fcall *tx)
+{
+	Ssh2Session *sp;
+	char *ep;
+
+	Fid *f;
+	f = oldauthfid(rx->afid, (void **)&sp, &ep);
+	if (f == nil) {
+		return ep;
+	}
+
+	if (chatty9p) {
+		fprint(2, "ssh2attach: afid %d state %d\n", rx->fid, sp->cli_mesg_state);
+	}
+
+	switch(sp->cli_mesg_state) {
+	case ServerStatus:
+			// block until ssh server responses
+
+			// test
+			sp->server_status_mesg = FAIL;
+			// tset
+
+			if (sp->server_status_mesg == FAIL) {
+				return "ssh authentication failed";
+			}
+
+			break;
+	default:
+		return "invalid state detected when returning authentication status";
 	}
 
 	return 0;
