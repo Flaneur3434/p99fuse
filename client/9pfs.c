@@ -549,20 +549,15 @@ main(int argc, char *argv[])
 	msize = _9pversion(Msize);
 	if(doauth){
 		authfid = _9pauth(AUTHFID, user, NULL);
-		if (strcmp(auth_method, "factotum")) {
+		if (strcmp(auth_method, "factotum") == 0) {
 				AuthInfo *ai = auth_proxy(authfid, auth_getkey, "proto=p9any role=client");
 			if(ai == NULL) {
 				err(1, "Could not establish authentication with factomum");
 			}
 
 			auth_freeAI(ai);
-		} else if (strcmp(auth_method, "ssh2")) {
-			SSH2Info *s2i = auth_ssh2(authfid, );
-			if (s2i == NULL) {
-				err(1, "Could not establish authentication with ssh2");
-			}
-
-			auth_freeS2I(s2i);
+		} else if (strcmp(auth_method, "ssh2") == 0) {
+			auth_ssh2(authfid);
 		}
 	}
 	rootfid = _9pattach(ROOTFID, doauth ? AUTHFID : NOFID, user, aname);

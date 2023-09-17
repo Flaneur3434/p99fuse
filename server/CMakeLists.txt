@@ -12,14 +12,5 @@ target_compile_options(u9fs PUBLIC -Wall -Wextra -Wshadow -Wduplicated-branches 
 set_target_properties(u9fs PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${BUILD_DIR})
 
-include(FetchContent)
-FetchContent_Declare(
-	libssh2
-	GIT_REPOSITORY https://github.com/libssh2/libssh2.git
-	GIT_TAG master
-	FIND_PACKAGE_ARGS # use find_package() before trying to download source
-)
-
-FetchContent_MakeAvailable(libssh2)
 target_link_libraries(u9fs PUBLIC libssh2::libssh2)
 target_include_directories(u9fs PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

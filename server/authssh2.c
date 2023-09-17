@@ -1,163 +1,106 @@
 #pragma once
 
-#include "u9fs.h"
-#include "u9fsauth.h"
-
-#include <ifaddrs.h>
+#include <libssh2.h>
+#include <sys/socket.h>
 #include <netdb.h>
-#include <string.h>
+#include <errno.h>
+
 #include <stdio.h>
+#include <string.h>
 
-/*
- * How does this work?
- *
- * u9fs (9p file server ) creates a connection to sshd in auth.init
- * 9fuse (9p client) sends a auth message to u9fs so it can mount a filesystem served by u9fs
- *
- * u9fs acts as a proxy to the sshd
- * u9fs recieves information sshd needs to authenticate the connection via the afd (returned by fauth)
- * this creates a dependency between u9fs and sshd authentication
- * if sshd authentication fails u9fs authentication also fails
- *
- *
- * step 1) 9fuse writes to afd -> u9fs recieves and passes info onto sshd
- * step 2) u9fs writes to afd a challenge recieved from sshd -> 9fuse recieves
- * step 3) 9fuse forwards challege to ssh agent -> ssh agent generates response -> hands it back to 9fuse
- * step 3) 9fuse writes to afd -> u9fs recieves the afd
- *         and passes information onto sshd
- * step 4) sshd validates the key response -> u9fs validates the 9fuse client -> exported root filesystem attaches to client
- *
- *
- * why use agent?
- * Proceeding connections to u9fs can be authenticated by the sshd (located on
- * server machine) and ssh agent (located on client machine) without user intervention
- *
- * If user wanted to use 9exe, they would be prompted to type in thier password
- * each time 9exe executes a remote command
- * With a ssh agent, they dont need too
- */
-
+#include "plan9.h"
+#include "fcall.h"
+#include "u9fs.h"
 
 extern int chatty9p;
 
-static AuthArgs auth_args;
+enum ClientMessageStatus {
+	ServerInfo = 24,
+	ServerStatus,
+};
 
-static SSH2_Config sshc;
-static SSH2_Server server;
-static RemoteClient client;
+enum SshServerStatus {
+	SUCC,
+	FAIL,
+};
 
-static void shutdown_ssh(void) {
-
-}
-
-static void
-parse_args(void) {
-	size_t arg_len = strlen(autharg); //ssh arguments
-	size_t i = 0;
-
-	/* get listening port */
-	auth_args = nil;
-}
-
-static void
-ssh2init(void) {
-	/*
-	 * autharg should contain information about:
-	 *
-	 * authentication type: NONE, PASSWORD, PUBLICKEY
-	 * listening port
-	 *
-	 */
-	int rc; /* error code */
-	rc = libssh2_init(0);
-    if(rc) {
-        fprintf(stderr, "libssh2 initialization failed (%d)\n", rc);
-        return;
-    }
-
-	struct addrinfo hints;
-	struct addrinfo *servinfo;                // Pointer to linked list
-
-	memset(&hints, 0, sizeof hints);   // make sure the struct is empty
-	hints.ai_family = AF_UNSPEC;              // don't care IPv4 or IPv6
-	hints.ai_socktype = SOCK_STREAM;          // TCP stream sockets
-	hints.ai_flags = AI_PASSIVE;              // fill in localhost IP
-
-	if (auth_args.listening_port == nil) {
-		auth_args.listening_port = "5640";
-	}
-
-	rc = getaddrinfo(nil, auth_args.listening_port, &hints, &servinfo);
-	if (rc != 0) {
-		fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(rc));
-		exit(1);
-	}
-
-    // loop through all the results returned by getaddrinfo and bind to the
-	// first we can
-
-	struct addrinfo *p;
-	int yes = 1;        // used to check if socket is available for re-use
-
-    for(p = servinfo; p != nil; p = p->ai_next) {
-		libssh2_socket_t sock = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
-        if (sock == LIBSSH2_INVALID_SOCKET) {
-            fprintf(stderr, "failed to open socket.\n");
-			continue;
-        }
-		rc = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int));
-        if (rc == -1) {
-            perror("setsockopt");
-            exit(1);
-        }
-
-		rc = bind(sock, p->ai_addr, p->ai_addrlen);
-        if (rc == -1) {
-            close(sock);
-            perror("server: bind");
-            continue;
-        }
-
-        break;
-    }
-
-	// check if socket binding was un-successful
-	if (p == nil) {
-		shutdown();
-	}
-
-	freeaddrinfo(servinfo);
-}
-
+typedef struct Ssh2Session Ssh2Session;
+struct Ssh2Session {
+	enum ClientMessageStatus cli_mesg_state;
+	enum SshServerStatus server_status_mesg; // if cli_mesg_state is ServerInfo, this field is un-used
+	char server_ip[13];
+	char server_port[6];
+};
 /*
- * Fcall fields:
- * size[4] Tauth tag[2] afid[4] uname[s] aname[s]
- * size[4] Rauth tag[2] aqid[13]
- *
- * If return is non-nil, indicates error
+ * 1) send a Rauth message with information about the ssh server (port, address,
+ *    ect.)
+ * 2) Block until a message from ssh server reporting if authentication
+ *    succeeded or failed
+ * 3) 9write auth successed response
  */
-static char*
-ssh2auth(Fcall *rx, Fcall *tx)
+
+static void
+seterror(Fcall *f, char *error)
 {
-	USED(tx);
-	USED(rx);
+	f->type = Rerror;
+	f->ename = error ? error : "programmer error";
+}
+
+/* open a connection with sshd to recieve direct forwarded messages */
+static void
+ssh2init() {
+	return;
+}
+
+// Rauth message that contains information about the ssh server (port, address,
+// ect.)
+static char*
+ssh2auth(Fcall *rx, Fcall *tx) {
+	char *ep;
+	Ssh2Session *sp = malloc(sizeof(Ssh2Session));
+	Fid *auth_fid = newauthfid(rx->afid, sp, &ep);
+	if (auth_fid == nil) {
+		free(sp);
+		return ep;
+	}
 	if (chatty9p) {
 		fprint(2, "ssh2auth: afid %d\n", rx->afid);
 	}
 
+	sp->cli_mesg_state = ServerInfo;
+	// test
+	char *ip = "192.168.1.43";
+	char *port = "5640";
+	//tset
+	memcpy(sp->server_ip, ip, strlen(ip) + 1);
+	memcpy(sp->server_port, port, strlen(port) + 1);
+	tx->aqid.type = QTAUTH;
+	tx->aqid.path = 1;
+	tx->aqid.vers = 0;
 	return 0;
 }
 
-/*
- * Fcall fields:
- * size[4] Tattach tag[2] fid[4] afid[4] uname[s] aname[s]
- * size[4] Rattach tag[2] aqid[13]
- */
 static char*
 ssh2attach(Fcall *rx, Fcall *tx)
 {
 	USED(rx);
 	USED(tx);
+	return 0;
+}
+
+static char *
+ssh2read(Fcall *rx, Fcall *tx) {
+	Ssh2Session *sp;
+	char *ep;
+
+	Fid *f;
+	f = oldauthfid(rx->fid, (void **)&sp, &ep);
+	if (f == nil)
+		return ep;
+	if (chatty9p) {
+		fprint(2, "p9anyread: afid %d state %d\n", rx->fid, sp->cli_mesg_state);
+	}
+
 	return 0;
 }
 
@@ -167,6 +110,4 @@ Auth authssh2 = {
 	ssh2attach,
 	ssh2init,
 	ssh2read,
-	ssh2write,
-	ssh2clunk,
 };

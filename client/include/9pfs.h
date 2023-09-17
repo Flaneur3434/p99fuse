@@ -1,3 +1,7 @@
+#pragma once
+#include "libc.h"
+#include <stdio.h>
+
 enum
 {
 	ROOTFID = 0,

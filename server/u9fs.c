@@ -283,6 +283,7 @@ getfcall(int fd, Fcall *fc)
 	if(readn(fd, rxbuf, 3) != 3)
 		sysfatal("couldn't read message");
 
+
 	/* is it an old (9P1) message? */
 	if(50 <= rxbuf[0] && rxbuf[0] <= 87 && (rxbuf[0]&1)==0 && GBIT16(rxbuf+1) == 0xFFFF){
 		old9p = 1;
@@ -306,8 +307,6 @@ isowner(User *u, Fid *f)
 {
 	return u->id == f->st.st_uid;
 }
-
-
 
 void
 serve(int rfd, int wfd)
@@ -729,6 +728,7 @@ stat2dir(char *path, struct stat *st, Dir *d)
 void
 rread(Fcall *rx, Fcall *tx)
 {
+
 	char *e, *path, *rpath;
 	uchar *p, *ep;
 	int n;

@@ -1,3 +1,6 @@
+#pragma once
+#include <stdint.h>
+
 #define nil NULL
 
 #define	nelem(x)	(sizeof(x)/sizeof((x)[0]))
@@ -57,6 +60,8 @@ typedef uintptr_t uintptr;
 typedef intptr_t intptr;
 typedef uint32_t u32int;
 typedef int32_t s32int;
+typedef unsigned int uint;
+typedef unsigned short ushort;
 typedef unsigned char uchar;
 typedef unsigned long long uvlong;
 typedef long long vlong;

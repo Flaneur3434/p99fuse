@@ -1,3 +1,8 @@
+#pragma once
+
+#include "libc.h"
+#include "9pfs.h"
+
 /*
  * Interface for typical callers.
  */
@@ -49,3 +54,4 @@ extern AuthInfo*	auth_getinfo(AuthRpc *rpc);
 extern AuthRpc*		auth_allocrpc(int afd);
 extern void		auth_freerpc(AuthRpc *rpc);
 extern uint		auth_rpc(AuthRpc *rpc, char *verb, void *a, int n);
+extern void auth_ssh2(FFid *f);

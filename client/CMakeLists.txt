@@ -24,6 +24,6 @@ endif()
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/lib)
 
+target_link_libraries(9fuse PUBLIC ${FUSE3_LIBRARY} PUBLIC lib)
 target_include_directories(9fuse PUBLIC ${FUSE3_INCLUDE_DIR} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(9fuse PUBLIC ${FUSE3_LIBRARY} lib)
 target_compile_definitions(9fuse PUBLIC FUSE_USE_VERSION=30)

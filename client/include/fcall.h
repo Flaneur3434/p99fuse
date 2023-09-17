@@ -1,3 +1,6 @@
+#pragma once
+#include "libc.h"
+
 #define	VERSION9P	"9P2000"
 #define	MAXWELEM	16
 
