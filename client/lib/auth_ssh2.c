@@ -8,6 +8,8 @@
 
 #include "9pfs.h"
 
+// connect to ssh server and authenticate
+// direct forwarding method
 void
 auth_ssh2(FFid *f) {
 	char buf[30];

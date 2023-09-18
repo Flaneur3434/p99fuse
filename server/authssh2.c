@@ -2,8 +2,11 @@
 
 #include <libssh2.h>
 #include <sys/socket.h>
-#include <netdb.h>
+#include <unistd.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <errno.h>
+ #include <netdb.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -28,16 +31,15 @@ typedef struct Ssh2Session Ssh2Session;
 struct Ssh2Session {
 	enum ClientMessageStatus cli_mesg_state;
 	enum SshServerStatus server_status_mesg; // if cli_mesg_state is ServerInfo, this field is un-used
-	char server_ip[13];
+	char ssh_server_ip[INET6_ADDRSTRLEN];
+	char ssh_server_port[6];
+	char server_ip[INET6_ADDRSTRLEN];
 	char server_port[6];
+	int ssh_auth_sockfd;
 };
-/*
- * 1) send a Rauth message with information about the ssh server (port, address,
- *    ect.)
- * 2) Block until a message from ssh server reporting if authentication
- *    succeeded or failed
- * 3) 9write auth successed response
- */
+
+
+Ssh2Session *sp;
 
 static void
 seterror(Fcall *f, char *error)
@@ -49,15 +51,76 @@ seterror(Fcall *f, char *error)
 /* open a connection with sshd to recieve direct forwarded messages */
 static void
 ssh2init() {
+	sp = malloc(sizeof(Ssh2Session));
+
+	int status;
+	int yes = 1;
+
+	struct addrinfo hints;
+	struct addrinfo *servinfo;  // will point to the results
+
+	memset(&hints, 0, sizeof hints); // make sure the struct is empty
+	memset(sp, 0, sizeof (Ssh2Session)); // make sure the struct is empty
+	hints.ai_family = AF_UNSPEC;     // don't care IPv4 or IPv6
+	hints.ai_socktype = SOCK_STREAM; // TCP stream sockets
+	hints.ai_flags = AI_PASSIVE;     // fill in my IP for me
+	memcpy(sp->server_port, "22000", 5); // port for communication
+	// might want to read -A for arguments
+
+	if ((status = getaddrinfo(nil, sp->server_port, &hints, &servinfo)) != 0) {
+		fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
+		exit(1);
+	}
+
+
+	// loop through all the results and bind to the first we can
+    for(struct addrinfo *p = servinfo; p != NULL; p = p->ai_next) {
+		void *addr;
+
+		// need to cast to different structs for IPv4 and IPv6
+		// to convert binary IP address to string with inet_ntop
+        if (p->ai_family == AF_INET) { // IPv4
+            struct sockaddr_in *ipv4 = (struct sockaddr_in *)p->ai_addr;
+            addr = &(ipv4->sin_addr);
+        } else { // IPv6
+            struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)p->ai_addr;
+            addr = &(ipv6->sin6_addr);
+        }
+
+        // convert the IP to a string
+        inet_ntop(p->ai_family, addr, sp->server_ip, p->ai_addrlen);
+
+        if ((sp->ssh_auth_sockfd = socket(p->ai_family, p->ai_socktype,
+							 p->ai_protocol)) == -1) {
+            perror("server: socket");
+            continue;
+        }
+
+		// check if socket is re-usable
+        if (setsockopt(sp->ssh_auth_sockfd, SOL_SOCKET, SO_REUSEADDR, &yes,
+					   sizeof(int)) == -1) {
+            perror("setsockopt");
+            exit(1);
+        }
+
+        if (bind(sp->ssh_auth_sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+            close(sp->ssh_auth_sockfd);
+            perror("server: bind");
+            continue;
+        }
+
+        break;
+    }
+
+	freeaddrinfo(servinfo); // free the linked-list
 	return;
 }
 
-// Rauth message that contains information about the ssh server (port, address,
-// ect.)
+// return new auth_fid
+// set data in global Ssh2Session
 static char*
 ssh2auth(Fcall *rx, Fcall *tx) {
 	char *ep;
-	Ssh2Session *sp = malloc(sizeof(Ssh2Session));
 	Fid *auth_fid = newauthfid(rx->afid, sp, &ep);
 	if (auth_fid == nil) {
 		free(sp);
@@ -90,6 +153,9 @@ readstr(Fcall *rx, Fcall *tx, char *s, int len)
 	return tx->count;
 }
 
+// change wat to write according to state
+// ServerInfo - write server info to afid
+// ServerStatus - listen to ssh_auth_sockfd and write if succeeded or failed to afid
 static char *
 ssh2read(Fcall *rx, Fcall *tx) {
 	Ssh2Session *sp;
@@ -129,6 +195,9 @@ ssh2read(Fcall *rx, Fcall *tx) {
 	return 0;
 }
 
+// check up after your self
+// free globabl state and such here cause client doesnt call tclunk after
+// attatch
 static char*
 ssh2attach(Fcall *rx, Fcall *tx)
 {
