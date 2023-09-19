@@ -10,6 +10,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdbool.h>
 
 #include "plan9.h"
 #include "fcall.h"
@@ -38,9 +39,6 @@ struct Ssh2Session {
 	int ssh_auth_sockfd;
 };
 
-
-Ssh2Session *sp;
-
 static void
 seterror(Fcall *f, char *error)
 {
@@ -48,10 +46,13 @@ seterror(Fcall *f, char *error)
 	f->ename = error ? error : "programmer error";
 }
 
-/* open a connection with sshd to recieve direct forwarded messages */
+/*
+ * Open a connection with sshd to recieve direct forwarded messages
+ * Prepare the server for incoming client requests by calling listen
+ */
 static void
 ssh2init() {
-	sp = malloc(sizeof(Ssh2Session));
+	Ssh2Session *sp = malloc(sizeof(Ssh2Session));
 
 	int status;
 	int yes = 1;
@@ -74,7 +75,8 @@ ssh2init() {
 
 
 	// loop through all the results and bind to the first we can
-    for(struct addrinfo *p = servinfo; p != NULL; p = p->ai_next) {
+	struct addrinfo *p;
+    for(p = servinfo; p != NULL; p = p->ai_next) {
 		void *addr;
 
 		// need to cast to different structs for IPv4 and IPv6
@@ -113,15 +115,31 @@ ssh2init() {
     }
 
 	freeaddrinfo(servinfo); // free the linked-list
+
+	if (p == NULL) {
+		fprintf(stderr, "server: failed to bind\n");
+        exit(1);
+	}
+
+	const int BACKLOG = 5;
+	if (listen(sp->ssh_auth_sockfd, BACKLOG) == -1) {
+        perror("listen");
+        exit(1);
+    }
+
+
 	return;
 }
 
-// return new auth_fid
-// set data in global Ssh2Session
+/*
+ * return new auth_fid
+ * set data in global Ssh2Session
+ */
 static char*
 ssh2auth(Fcall *rx, Fcall *tx) {
+	Ssh2Session *sp;
 	char *ep;
-	Fid *auth_fid = newauthfid(rx->afid, sp, &ep);
+	Fid *auth_fid = newauthfid(rx->afid, (void **)&sp, &ep);
 	if (auth_fid == nil) {
 		free(sp);
 		return ep;
@@ -153,9 +171,10 @@ readstr(Fcall *rx, Fcall *tx, char *s, int len)
 	return tx->count;
 }
 
-// change wat to write according to state
-// ServerInfo - write server info to afid
-// ServerStatus - listen to ssh_auth_sockfd and write if succeeded or failed to afid
+/*
+ * change wat to write according to state
+ * ServerInfo - write server info to afid
+ */
 static char *
 ssh2read(Fcall *rx, Fcall *tx) {
 	Ssh2Session *sp;
@@ -171,23 +190,25 @@ ssh2read(Fcall *rx, Fcall *tx) {
 	}
 
 
-	// test data
-	char *ip = "192.168.1.43";
-	char *port = "5640";
-	// atad tset
+	char *ip = sp->server_ip;     // assume ssh server on same ip as u9fs server
+	char *port = "22";            // default port number for ssh connections
 
 	switch(sp->cli_mesg_state) {
-	case ServerInfo:
-			memcpy(sp->server_ip, ip, strlen(ip) + 1);
-			memcpy(sp->server_port, port, strlen(port) + 1);
+	case ServerInfo: {
+		memcpy(sp->server_ip, ip, strlen(ip) + 1);
+		memcpy(sp->server_port, port, strlen(port) + 1);
 
-			// send ip and port as one string
-			// sprintf
+		// send ip and port as one string
+		// INET6_ADDRSTRLEN + PORT_STRLEN + NULL
+		const int max_mesg_len = INET6_ADDRSTRLEN + 6 + 1;
+		char mesg[max_mesg_len];
+		snprintf(mesg, max_mesg_len, "%s:%s", sp->server_ip, sp->server_port);
 
-			readstr(rx, tx, sp->server_ip, strlen(sp->server_ip) + 1);
+		readstr(rx, tx, mesg, strnlen(mesg, max_mesg_len));
 
-			sp->cli_mesg_state = ServerStatus;
-			break;
+		sp->cli_mesg_state = ServerStatus;
+		break;
+	}
 	default:
 		return "invalid state detected when returning server info";
 	}
@@ -195,43 +216,80 @@ ssh2read(Fcall *rx, Fcall *tx) {
 	return 0;
 }
 
-// check up after your self
-// free globabl state and such here cause client doesnt call tclunk after
-// attatch
+/*
+ * Accept new connection from ssh server and comfirm authentication
+ * Clean up after your self
+ * free globabl state and such here cause client doesnt call tclunk after attach
+ */
 static char*
 ssh2attach(Fcall *rx, Fcall *tx)
 {
+	return 0;
+
+	char *auth_error_mesg = NULL;
+	int ssh_auth_fd = -1;
+
 	Ssh2Session *sp;
 	char *ep;
-
-	Fid *f;
-	f = oldauthfid(rx->afid, (void **)&sp, &ep);
+	Fid *f = oldauthfid(rx->afid, (void **)&sp, &ep);
 	if (f == nil) {
-		return ep;
+		auth_error_mesg = ep;
+		goto cleanup;
 	}
 
 	if (chatty9p) {
 		fprint(2, "ssh2attach: afid %d state %d\n", rx->fid, sp->cli_mesg_state);
 	}
 
+	char auth_buffer[20];
 	switch(sp->cli_mesg_state) {
-	case ServerStatus:
-			// block until ssh server responses
+	case ServerStatus: {
+		struct sockaddr_storage ssh_server_addr;
+		socklen_t ssh_server_addr_size = sizeof ssh_server_addr;
+		ssh_auth_fd = accept(sp->ssh_auth_sockfd, (struct sockaddr *)&ssh_server_addr, &ssh_server_addr_size);
+		if (ssh_auth_fd == -1) {
+			auth_error_mesg = strerror(errno);
+            goto cleanup;
+        }
 
-			// test
+		int rc = recv(ssh_auth_fd, auth_buffer, sizeof auth_buffer, 0);
+
+		if (rc == -1) {
+			auth_error_mesg = strerror(errno);
+			goto cleanup;
+		} else if (rc == 0) {
+			auth_error_mesg = strdup("ssh2attach: ssh server closed connection, could not authenticate");
+			goto cleanup;
+		}
+
+		if (strncmp(auth_buffer, "SUCC", 20) == 0) {
+			sp->server_status_mesg = SUCC;
+		} else if (strncmp(auth_buffer, "FAIL", 20) == 0) {
 			sp->server_status_mesg = FAIL;
-			// tset
+			auth_error_mesg = strdup("ssh2attach: ssh authentication failed");
+		} else {
+			auth_error_mesg = strndup(auth_buffer, sizeof auth_buffer);
+			goto cleanup;
+		}
 
-			if (sp->server_status_mesg == FAIL) {
-				return "ssh authentication failed";
-			}
-
-			break;
+		break;
+	}
 	default:
-		return "invalid state detected when returning authentication status";
+		auth_error_mesg = strdup("invalid state detected when returning authentication status");
+		goto cleanup;
 	}
 
-	return 0;
+  cleanup:; // empty statement cause C is wack yo
+	if (ssh_auth_fd != -1) {
+		close(ssh_auth_fd);
+	}
+
+	if (sp->ssh_auth_sockfd != -1) {
+		close(sp->ssh_auth_sockfd);
+	}
+
+	free(sp);
+	return auth_error_mesg;
 }
 
 Auth authssh2 = {
