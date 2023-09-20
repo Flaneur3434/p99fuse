@@ -34,7 +34,7 @@ typedef struct Ssh2Session Ssh2Session;
 struct Ssh2Session {
 	enum ClientMessageStatus cli_mesg_state;
 	enum SshServerStatus server_status_mesg; // if cli_mesg_state is ServerInfo, this field is un-used
-	char ssh_server_ip[NI_MAXHOST];
+	char ssh_server_ip[INET6_ADDRSTRLEN];
 	char ssh_server_port[6];
 	int recieving_sock;
 };
@@ -96,7 +96,7 @@ ssh2init() {
 		break;
 	}
 
-	sp->ssh_server_port = "22"; // default ssh server port
+	strcpy(sp->ssh_server_port, "22"); // default ssh server port
 
 	// create socket and bind to ip address
 	int status;
@@ -229,13 +229,15 @@ ssh2read(Fcall *rx, Fcall *tx) {
 	switch(session->cli_mesg_state) {
 	case ServerInfo: {
 		// send ip and port as one string
-		// INET6_ADDRSTRLEN + PORT_STRLEN + NULL
 		const int max_mesg_len =
-			strnlen(sp->ssh_server_ip, NI_MAXHOST)
+			strnlen(sp->ssh_server_ip, INET6_ADDRSTRLEN)
+			+ 1
 			+ strnlen(sp->ssh_server_port, 6)
-			+ 1; //null
+			+ 1
+			+ 1;
+
 		char mesg[max_mesg_len];
-		snprintf(mesg, max_mesg_len, "%s:%s", session->ssh_server_ip, session->ssh_server_port);
+		snprintf(mesg, max_mesg_len, "%s:%s:", session->ssh_server_ip, session->ssh_server_port);
 
 		readstr(rx, tx, mesg, strnlen(mesg, max_mesg_len));
 
