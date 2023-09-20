@@ -3,3 +3,4 @@ add_library(lib STATIC auth_getkey.c auth_proxy.c auth_rpc.c auth_ssh2.c convD2M
 
 target_link_libraries(lib PUBLIC libssh2::libssh2)
 target_include_directories(lib PUBLIC ../include)
+target_compile_definitions(9fuse PUBLIC _GNU_SOURCE)

@@ -1,12 +1,14 @@
 #pragma once
 
 #include <libssh2.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <linux/if_link.h>
+#include <unistd.h>
 #include <errno.h>
- #include <netdb.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -32,11 +34,9 @@ typedef struct Ssh2Session Ssh2Session;
 struct Ssh2Session {
 	enum ClientMessageStatus cli_mesg_state;
 	enum SshServerStatus server_status_mesg; // if cli_mesg_state is ServerInfo, this field is un-used
-	char ssh_server_ip[INET6_ADDRSTRLEN];
+	char ssh_server_ip[NI_MAXHOST];
 	char ssh_server_port[6];
-	char server_ip[INET6_ADDRSTRLEN];
-	char server_port[6];
-	int ssh_auth_sockfd;
+	int recieving_sock;
 };
 Ssh2Session *sp;
 
@@ -54,22 +54,62 @@ seterror(Fcall *f, char *error)
 static void
 ssh2init() {
 	sp = malloc(sizeof(Ssh2Session));
+	memset(sp, 0, sizeof (Ssh2Session)); // make sure the struct is empty
 
+	// loop interfaces and get ip address
+	struct ifaddrs *ifaddr;
+
+	if (getifaddrs(&ifaddr) == -1) {
+		perror("getifaddrs");
+		exit(1);
+	}
+
+	struct ifaddrs *ifa = ifaddr;
+	for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+		if (ifa->ifa_addr == NULL) {
+			continue;
+		}
+
+		if (((ifa->ifa_flags & IFF_RUNNING) != IFF_RUNNING)
+			|| ((ifa->ifa_flags & IFF_LOOPBACK) == IFF_LOOPBACK)) {
+			continue;
+		}
+
+		int family = ifa->ifa_addr->sa_family;
+		size_t addr_struct_size = 0;
+		if (family == AF_INET) {
+			addr_struct_size = sizeof(struct sockaddr_in);
+		} else if (family == AF_INET6) {
+			addr_struct_size = sizeof(struct sockaddr_in6);
+		} else if (family == AF_PACKET){
+			// i dont care
+			continue;
+		}
+
+		getnameinfo(ifa->ifa_addr,
+					addr_struct_size,
+					sp->ssh_server_ip,
+					NI_MAXHOST,
+					NULL,
+					0,
+					NI_NUMERICHOST);
+		break;
+	}
+
+	sp->ssh_server_port = "22"; // default ssh server port
+
+	// create socket and bind to ip address
 	int status;
 	int yes = 1;
-
 	struct addrinfo hints;
 	struct addrinfo *servinfo;  // will point to the results
 
-	memset(&hints, 0, sizeof hints); // make sure the struct is empty
-	memset(sp, 0, sizeof (Ssh2Session)); // make sure the struct is empty
+	memset(&hints, 0, sizeof hints); // make sure the struct is empty for defaults of getaddrinfo
 	hints.ai_family = AF_UNSPEC;     // don't care IPv4 or IPv6
 	hints.ai_socktype = SOCK_STREAM; // TCP stream sockets
 	hints.ai_flags = AI_PASSIVE;     // fill in my IP for me
-	memcpy(sp->server_port, "22000", 5); // port for communication
-	// might want to read -A for arguments
 
-	if ((status = getaddrinfo(nil, sp->server_port, &hints, &servinfo)) != 0) {
+	if ((status = getaddrinfo(sp->ssh_server_ip, NULL, &hints, &servinfo)) != 0) {
 		fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
 		exit(1);
 	}
@@ -89,40 +129,39 @@ ssh2init() {
             addr = &(ipv6->sin6_addr);
         }
 
-        // convert the IP to a string
-        inet_ntop(p->ai_family, addr, sp->server_ip, p->ai_addrlen);
-
-        if ((sp->ssh_auth_sockfd = socket(p->ai_family, p->ai_socktype,
+        if ((sp->recieving_sock = socket(p->ai_family, p->ai_socktype,
 							 p->ai_protocol)) == -1) {
-            perror("server: socket");
+            perror("socket");
             continue;
         }
 
-		// check if socket is re-usable
-        if (setsockopt(sp->ssh_auth_sockfd, SOL_SOCKET, SO_REUSEADDR, &yes,
+		// set socket option so it is re-usable
+        if (setsockopt(sp->recieving_sock, SOL_SOCKET, SO_REUSEADDR, &yes,
 					   sizeof(int)) == -1) {
             perror("setsockopt");
             exit(1);
         }
 
-        if (bind(sp->ssh_auth_sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-            close(sp->ssh_auth_sockfd);
-            perror("server: bind");
+        if (bind(sp->recieving_sock, p->ai_addr, p->ai_addrlen) == -1) {
+            close(sp->recieving_sock);
+            perror("bind");
             continue;
         }
 
         break;
     }
 
-	freeaddrinfo(servinfo); // free the linked-list
-
 	if (p == NULL) {
 		fprintf(stderr, "server: failed to bind\n");
         exit(1);
 	}
 
+	// free the linked-lists
+	freeaddrinfo(servinfo);
+	freeifaddrs(ifaddr);
+
 	const int BACKLOG = 5;
-	if (listen(sp->ssh_auth_sockfd, BACKLOG) == -1) {
+	if (listen(sp->recieving_sock, BACKLOG) == -1) {
         perror("listen");
         exit(1);
     }
@@ -187,20 +226,16 @@ ssh2read(Fcall *rx, Fcall *tx) {
 		fprint(2, "ssh2read: afid %d state %d\n", rx->afid, session->cli_mesg_state);
 	}
 
-
-	char *ip = session->server_ip;     // assume ssh server on same ip as u9fs server
-	char *port = "22";            // default port number for ssh connections
-
 	switch(session->cli_mesg_state) {
 	case ServerInfo: {
-		memcpy(session->server_ip, ip, strlen(ip) + 1);
-		memcpy(session->server_port, port, strlen(port) + 1);
-
 		// send ip and port as one string
 		// INET6_ADDRSTRLEN + PORT_STRLEN + NULL
-		const int max_mesg_len = INET6_ADDRSTRLEN + 6 + 1;
+		const int max_mesg_len =
+			strnlen(sp->ssh_server_ip, NI_MAXHOST)
+			+ strnlen(sp->ssh_server_port, 6)
+			+ 1; //null
 		char mesg[max_mesg_len];
-		snprintf(mesg, max_mesg_len, "%s:%s", session->server_ip, session->server_port);
+		snprintf(mesg, max_mesg_len, "%s:%s", session->ssh_server_ip, session->ssh_server_port);
 
 		readstr(rx, tx, mesg, strnlen(mesg, max_mesg_len));
 
@@ -237,12 +272,14 @@ ssh2attach(Fcall *rx, Fcall *tx)
 		fprint(2, "ssh2attach: afid %d state %d\n", rx->afid, session->cli_mesg_state);
 	}
 
+	return 0;
+
 	char auth_buffer[20];
 	switch(session->cli_mesg_state) {
 	case ServerStatus: {
 		struct sockaddr_storage ssh_server_addr;
 		socklen_t ssh_server_addr_size = sizeof ssh_server_addr;
-		ssh_auth_fd = accept(session->ssh_auth_sockfd, (struct sockaddr *)&ssh_server_addr, &ssh_server_addr_size);
+		ssh_auth_fd = accept(session->recieving_sock, (struct sockaddr *)&ssh_server_addr, &ssh_server_addr_size);
 		if (ssh_auth_fd == -1) {
 			auth_error_mesg = strerror(errno);
             goto cleanup;
@@ -280,8 +317,8 @@ ssh2attach(Fcall *rx, Fcall *tx)
 		close(ssh_auth_fd);
 	}
 
-	if (session->ssh_auth_sockfd != -1) {
-		close(session->ssh_auth_sockfd);
+	if (session->recieving_sock != -1) {
+		close(session->recieving_sock);
 	}
 
 	free(session);
