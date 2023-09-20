@@ -34,8 +34,8 @@ typedef struct Ssh2Session Ssh2Session;
 struct Ssh2Session {
 	enum ClientMessageStatus cli_mesg_state;
 	enum SshServerStatus server_status_mesg; // if cli_mesg_state is ServerInfo, this field is un-used
-	char ssh_server_ip[INET6_ADDRSTRLEN];
-	char ssh_server_port[6];
+	char server_ip[INET6_ADDRSTRLEN];
+	char listening_port[6];
 	int recieving_sock;
 };
 Ssh2Session *sp;
@@ -88,15 +88,13 @@ ssh2init() {
 
 		getnameinfo(ifa->ifa_addr,
 					addr_struct_size,
-					sp->ssh_server_ip,
+					sp->server_ip,
 					NI_MAXHOST,
 					NULL,
 					0,
 					NI_NUMERICHOST);
 		break;
 	}
-
-	strcpy(sp->ssh_server_port, "22"); // default ssh server port
 
 	// create socket and bind to ip address
 	int status;
@@ -109,7 +107,7 @@ ssh2init() {
 	hints.ai_socktype = SOCK_STREAM; // TCP stream sockets
 	hints.ai_flags = AI_PASSIVE;     // fill in my IP for me
 
-	if ((status = getaddrinfo(sp->ssh_server_ip, NULL, &hints, &servinfo)) != 0) {
+	if ((status = getaddrinfo(sp->server_ip, NULL, &hints, &servinfo)) != 0) {
 		fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
 		exit(1);
 	}
@@ -117,18 +115,6 @@ ssh2init() {
 	// loop through all the results and bind to the first we can
 	struct addrinfo *p;
     for(p = servinfo; p != NULL; p = p->ai_next) {
-		void *addr;
-
-		// need to cast to different structs for IPv4 and IPv6
-		// to convert binary IP address to string with inet_ntop
-        if (p->ai_family == AF_INET) { // IPv4
-            struct sockaddr_in *ipv4 = (struct sockaddr_in *)p->ai_addr;
-            addr = &(ipv4->sin_addr);
-        } else { // IPv6
-            struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)p->ai_addr;
-            addr = &(ipv6->sin6_addr);
-        }
-
         if ((sp->recieving_sock = socket(p->ai_family, p->ai_socktype,
 							 p->ai_protocol)) == -1) {
             perror("socket");
@@ -146,6 +132,27 @@ ssh2init() {
             close(sp->recieving_sock);
             perror("bind");
             continue;
+        }
+
+		// need to cast to different structs for IPv4 and IPv6
+		// to convert binary IP address to string with inet_ntop
+        if (p->ai_family == AF_INET) { // IPv4
+            struct sockaddr_in *ipv4 = (struct sockaddr_in *)p->ai_addr;
+			socklen_t len = sizeof (struct sockaddr_in);
+			if (getsockname(sp->recieving_sock, (struct sockaddr *)ipv4, &len) == -1) {
+				perror("getsockname");
+			} else {
+				snprintf(sp->listening_port, 6, "%d", ntohs(ipv4->sin_port));
+			}
+        } else { // IPv6
+            struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)p->ai_addr;
+			socklen_t len = sizeof (struct sockaddr_in6);
+			if (getsockname(sp->recieving_sock, (struct sockaddr *)ipv6, &len) == -1) {
+				perror("getsockname");
+			} else {
+				fprint(2, "ipv6 port: %d\n", ntohs(ipv6->sin6_port));
+				snprintf(sp->listening_port, 6, "%d", ntohs(ipv6->sin6_port));
+			}
         }
 
         break;
@@ -230,14 +237,14 @@ ssh2read(Fcall *rx, Fcall *tx) {
 	case ServerInfo: {
 		// send ip and port as one string
 		const int max_mesg_len =
-			strnlen(sp->ssh_server_ip, INET6_ADDRSTRLEN)
+			strnlen(sp->server_ip, INET6_ADDRSTRLEN)
 			+ 1
-			+ strnlen(sp->ssh_server_port, 6)
+			+ strnlen(sp->listening_port, 6)
 			+ 1
 			+ 1;
 
 		char mesg[max_mesg_len];
-		snprintf(mesg, max_mesg_len, "%s:%s:", session->ssh_server_ip, session->ssh_server_port);
+		snprintf(mesg, max_mesg_len, "%s:%s:", session->server_ip, session->listening_port);
 
 		readstr(rx, tx, mesg, strnlen(mesg, max_mesg_len));
 
