@@ -38,6 +38,7 @@ struct Ssh2Session {
 	char server_port[6];
 	int ssh_auth_sockfd;
 };
+Ssh2Session *sp;
 
 static void
 seterror(Fcall *f, char *error)
@@ -52,7 +53,7 @@ seterror(Fcall *f, char *error)
  */
 static void
 ssh2init() {
-	Ssh2Session *sp = malloc(sizeof(Ssh2Session));
+	sp = malloc(sizeof(Ssh2Session));
 
 	int status;
 	int yes = 1;
@@ -72,7 +73,6 @@ ssh2init() {
 		fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
 		exit(1);
 	}
-
 
 	// loop through all the results and bind to the first we can
 	struct addrinfo *p;
@@ -127,6 +127,7 @@ ssh2init() {
         exit(1);
     }
 
+	sp->cli_mesg_state = ServerInfo; // set flag
 
 	return;
 }
@@ -137,9 +138,9 @@ ssh2init() {
  */
 static char*
 ssh2auth(Fcall *rx, Fcall *tx) {
-	Ssh2Session *sp;
 	char *ep;
-	Fid *auth_fid = newauthfid(rx->afid, (void **)&sp, &ep);
+
+	Fid *auth_fid = newauthfid(rx->afid, sp, &ep);
 	if (auth_fid == nil) {
 		free(sp);
 		return ep;
@@ -147,8 +148,6 @@ ssh2auth(Fcall *rx, Fcall *tx) {
 	if (chatty9p) {
 		fprint(2, "ssh2auth: afid %d\n", rx->afid);
 	}
-
-	sp->cli_mesg_state = ServerInfo;
 
 	tx->aqid.type = QTAUTH;
 	tx->aqid.path = 1;
@@ -177,40 +176,39 @@ readstr(Fcall *rx, Fcall *tx, char *s, int len)
  */
 static char *
 ssh2read(Fcall *rx, Fcall *tx) {
-	Ssh2Session *sp;
 	char *ep;
+	Ssh2Session *session;
 
-	Fid *f;
-	f = oldauthfid(rx->fid, (void **)&sp, &ep);
+	Fid *f = oldauthfid(rx->afid, (void **)&session, &ep);
 	if (f == nil) {
 		return ep;
 	}
 	if (chatty9p) {
-		fprint(2, "ssh2read: afid %d state %d\n", rx->fid, sp->cli_mesg_state);
+		fprint(2, "ssh2read: afid %d state %d\n", rx->afid, session->cli_mesg_state);
 	}
 
 
-	char *ip = sp->server_ip;     // assume ssh server on same ip as u9fs server
+	char *ip = session->server_ip;     // assume ssh server on same ip as u9fs server
 	char *port = "22";            // default port number for ssh connections
 
-	switch(sp->cli_mesg_state) {
+	switch(session->cli_mesg_state) {
 	case ServerInfo: {
-		memcpy(sp->server_ip, ip, strlen(ip) + 1);
-		memcpy(sp->server_port, port, strlen(port) + 1);
+		memcpy(session->server_ip, ip, strlen(ip) + 1);
+		memcpy(session->server_port, port, strlen(port) + 1);
 
 		// send ip and port as one string
 		// INET6_ADDRSTRLEN + PORT_STRLEN + NULL
 		const int max_mesg_len = INET6_ADDRSTRLEN + 6 + 1;
 		char mesg[max_mesg_len];
-		snprintf(mesg, max_mesg_len, "%s:%s", sp->server_ip, sp->server_port);
+		snprintf(mesg, max_mesg_len, "%s:%s", session->server_ip, session->server_port);
 
 		readstr(rx, tx, mesg, strnlen(mesg, max_mesg_len));
 
-		sp->cli_mesg_state = ServerStatus;
+		session->cli_mesg_state = ServerStatus;
 		break;
 	}
 	default:
-		return "invalid state detected when returning server info";
+		return "ssh2read: Invalid state detected when returning server info";
 	}
 
 	return 0;
@@ -224,29 +222,27 @@ ssh2read(Fcall *rx, Fcall *tx) {
 static char*
 ssh2attach(Fcall *rx, Fcall *tx)
 {
-	return 0;
-
+	Ssh2Session *session;
 	char *auth_error_mesg = NULL;
 	int ssh_auth_fd = -1;
 
-	Ssh2Session *sp;
 	char *ep;
-	Fid *f = oldauthfid(rx->afid, (void **)&sp, &ep);
+	Fid *f = oldauthfid(rx->afid, (void **)&session, &ep);
 	if (f == nil) {
 		auth_error_mesg = ep;
 		goto cleanup;
 	}
 
 	if (chatty9p) {
-		fprint(2, "ssh2attach: afid %d state %d\n", rx->fid, sp->cli_mesg_state);
+		fprint(2, "ssh2attach: afid %d state %d\n", rx->afid, session->cli_mesg_state);
 	}
 
 	char auth_buffer[20];
-	switch(sp->cli_mesg_state) {
+	switch(session->cli_mesg_state) {
 	case ServerStatus: {
 		struct sockaddr_storage ssh_server_addr;
 		socklen_t ssh_server_addr_size = sizeof ssh_server_addr;
-		ssh_auth_fd = accept(sp->ssh_auth_sockfd, (struct sockaddr *)&ssh_server_addr, &ssh_server_addr_size);
+		ssh_auth_fd = accept(session->ssh_auth_sockfd, (struct sockaddr *)&ssh_server_addr, &ssh_server_addr_size);
 		if (ssh_auth_fd == -1) {
 			auth_error_mesg = strerror(errno);
             goto cleanup;
@@ -263,9 +259,9 @@ ssh2attach(Fcall *rx, Fcall *tx)
 		}
 
 		if (strncmp(auth_buffer, "SUCC", 20) == 0) {
-			sp->server_status_mesg = SUCC;
+			session->server_status_mesg = SUCC;
 		} else if (strncmp(auth_buffer, "FAIL", 20) == 0) {
-			sp->server_status_mesg = FAIL;
+			session->server_status_mesg = FAIL;
 			auth_error_mesg = strdup("ssh2attach: ssh authentication failed");
 		} else {
 			auth_error_mesg = strndup(auth_buffer, sizeof auth_buffer);
@@ -275,7 +271,7 @@ ssh2attach(Fcall *rx, Fcall *tx)
 		break;
 	}
 	default:
-		auth_error_mesg = strdup("invalid state detected when returning authentication status");
+		auth_error_mesg = strdup("ssh2attach: Invalid state detected when returning authentication status");
 		goto cleanup;
 	}
 
@@ -284,11 +280,11 @@ ssh2attach(Fcall *rx, Fcall *tx)
 		close(ssh_auth_fd);
 	}
 
-	if (sp->ssh_auth_sockfd != -1) {
-		close(sp->ssh_auth_sockfd);
+	if (session->ssh_auth_sockfd != -1) {
+		close(session->ssh_auth_sockfd);
 	}
 
-	free(sp);
+	free(session);
 	return auth_error_mesg;
 }
 

@@ -12,10 +12,11 @@
 // direct forwarding method
 void
 auth_ssh2(FFid *f) {
-	char buf[30];
-	if (_9pread(f, buf, 13) < 13) {
-		DPRINT("Failed to get ssh auth server info\n");
-		return;
-	}
+	char buf[46 + 6 + 1];
+	_9pread(f, buf, sizeof buf);
+	/* if (_9pread(f, buf, sizeof buf) < sizeof buf) { */
+	/* 	DPRINT("Failed to get ssh auth server info\n"); */
+	/* } */
+
 	DPRINT("read back %s\n", buf);
 }
