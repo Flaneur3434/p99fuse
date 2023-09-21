@@ -3,11 +3,17 @@ Added ssh authentication support to 9pfs and u9fs
 * Dependencies
 ** libssh2
 Client-side C library implementing the SSH2 protocol
+
 https://github.com/libssh2/libssh2
+* Setup
+If you want to use pubkey authentication please set up your sshd_config correctly. In addition add your public key to the known_hosts list of the remote machine.
+
+If your private key file is PEM encoded please modify the source code in ~client/lib/auth_ssh2.c~ to ask for decryption password.
 * Original Projects
 ** 9pfs
 A fork of a fork of a abandoned project
 
 https://github.com/bunny351/9pfs
 ** u9fs
+
 https://github.com/sevki/u9fs

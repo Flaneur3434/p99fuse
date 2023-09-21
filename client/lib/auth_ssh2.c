@@ -12,12 +12,14 @@
 #include <string.h>
 #include <stdbool.h>
 
+#include <termios.h>
+
 #include "9pfs.h"
 
 typedef struct SystemInfo SystemInfo;
 struct SystemInfo {
-	const char *pubkey;
-	const char *privkey;
+	char pubkey[64];
+	char privkey[64];
 	char username[30];
 	char password[30];
 };
@@ -28,6 +30,8 @@ struct SshServerInfo {
 	int ip_len;
 	char *port;
 	int port_len;
+	char *auth_method;
+	int auth_method_len;
 };
 
 // this makes sense!
@@ -37,14 +41,79 @@ parse_ssh_info_mesg(char *buf, SshServerInfo *info) {
 	char *tok = strpbrk(buf, ":");
 	info->ip_len = tok - buf;
 
-	info->port = tok+1;
+	info->port = tok + 1;
 	tok = strpbrk(info->port, ":");
 	info->port_len = tok - (info->port);
+
+	info->auth_method = tok + 1;
+	tok = strpbrk(info->auth_method, ":");
+	info->auth_method_len = tok - (info->auth_method);
 }
+
+enum {
+    AUTH_NONE = 0,
+    AUTH_PASSWORD = 1,
+    AUTH_PUBLICKEY = 2
+};
+
 
 static bool
 compare_known_hosts(const char *server_fingerprint) {
 	return true;
+}
+
+static void
+get_password(char *password)
+{
+    static struct termios old_terminal;
+    static struct termios new_terminal;
+
+    //get settings of the actual terminal
+    tcgetattr(STDIN_FILENO, &old_terminal);
+
+    // do not echo the characters
+    new_terminal = old_terminal;
+    new_terminal.c_lflag &= ~(ECHO);
+
+    // set this as the new terminal options
+    tcsetattr(STDIN_FILENO, TCSANOW, &new_terminal);
+
+    // get the password
+    // the user can add chars and delete if he puts it wrong
+    // the input process is done when he hits the enter
+    // the \n is stored, we replace it with \0
+    if (fgets(password, BUFSIZ, stdin) == NULL) {
+		password[0] = '\0';
+	}
+    else {
+		password[strlen(password)-1] = '\0';
+	}
+
+    // go back to the old settings
+    tcsetattr(STDIN_FILENO, TCSANOW, &old_terminal);
+}
+
+static void
+sys_info_init(SystemInfo *this) {
+	getlogin_r(this->username, 30);
+
+	const int pubkey_size = 64;
+	const int privkey_size = 64;
+
+	snprintf(this->pubkey, pubkey_size, "/home/%s/.ssh/id_rsa.pub", this->username);
+	snprintf(this->privkey, privkey_size, "/home/%s/.ssh/id_rsa", this->username);
+}
+
+static void
+server_info_init(SshServerInfo *this, char *ip_addr, char *port, char *auth_method) {
+	strncpy(ip_addr, this->ip, this->ip_len);
+	ip_addr[this->ip_len] = '\0';
+
+	strncpy(port, this->port, this->port_len);
+	port[this->port_len] = '\0';
+
+	strncpy(auth_method, this->auth_method, this->auth_method_len);
+	auth_method[this->auth_method_len] = '\0';
 }
 
 // connect to ssh server and authenticate
@@ -53,30 +122,24 @@ void
 auth_ssh2(FFid *f) {
 	// consolidate system info
 	SystemInfo sys_info = {0};
-	sys_info.pubkey = ".ssh/id_rsa.pub";
-	sys_info.privkey = ".ssh/id_rsa";
-	getlogin_r(sys_info.username, 30);
+	sys_info_init(&sys_info);
 
-	// big enough to hold IP address and Port number and null terminators
-	char buf[INET6_ADDRSTRLEN + 6];
+	char buf[128];
 	SshServerInfo info;
 
 	// get server info (ip and port)
 	_9pread(f, buf, sizeof buf);
 	parse_ssh_info_mesg(buf, &info);
 
-	DPRINT("ip address of ssh server: %.*s %d\nconnection port of ssh server: %.*s %d\n",
-		   info.ip_len, info.ip, info.ip_len, info.port_len, info.port, info.port_len);
+	DPRINT("ip address of ssh server: %.*s %d\nconnection port of ssh server: %.*s %d\nauth method: %.*s\n",
+		   info.ip_len, info.ip, info.ip_len, info.port_len, info.port, info.port_len, info.auth_method_len, info.auth_method);
 
 
 	// setup variables and such ...
 	char server_ip_addr[info.ip_len + 1];
-	strncpy(server_ip_addr, info.ip, info.ip_len);
-	server_ip_addr[info.ip_len] = '\0';
-
 	char server_port[info.port_len + 1];
-	strncpy(server_port, info.port, info.port_len);
-	server_port[info.port_len] = '\0';
+	char auth_method[info.auth_method_len + 1];
+	server_info_init(&info, server_ip_addr, server_port, auth_method);
 
 	int rc = 0; // error value
 
@@ -158,7 +221,57 @@ auth_ssh2(FFid *f) {
 
 	// check what authentication methods are available
     char *userauthlist = libssh2_userauth_list(session, sys_info.username, (unsigned int)strlen(sys_info.username));
-	DPRINT("userauthlist: %s\n", userauthlist);
+	if(userauthlist == NULL) {
+		DPRINT("No authentication method found\n");
+		goto shutdown;
+	}
+
+	DPRINT("Authentication methods: %s\n", userauthlist);
+
+	// set available auth methods
+	int auth = AUTH_NONE;
+	if(strstr(userauthlist, "password")) {
+		auth |= AUTH_PASSWORD;
+	}
+	if(strstr(userauthlist, "publickey")) {
+		auth |= AUTH_PUBLICKEY;
+	}
+
+	// set auth method to the one server requested
+	if(((auth & AUTH_PASSWORD) == AUTH_PASSWORD) && (strcmp(auth_method, "int") == 0)) {
+		auth = AUTH_PASSWORD;
+	} else if(((auth & AUTH_PUBLICKEY) == AUTH_PUBLICKEY) && (strcmp(auth_method, "key") == 0)) {
+		auth = AUTH_PUBLICKEY;
+	} else {
+		auth = AUTH_NONE;
+	}
+
+	if((auth & AUTH_PASSWORD) == AUTH_PASSWORD) {
+		puts("Insert ssh login password:");
+		get_password(sys_info.password);
+		if(libssh2_userauth_password(session, sys_info.username, sys_info.password)) {
+			DPRINT("Authentication by password failed.\n");
+			goto shutdown;
+		} else {
+			DPRINT("Authentication by paswword succeeded.\n");
+		}
+	} else if((auth & AUTH_PUBLICKEY) == AUTH_PUBLICKEY) {
+		if(libssh2_userauth_publickey_fromfile(session,
+											   sys_info.username,
+											   sys_info.pubkey,
+											   sys_info.privkey,
+											   NULL)) {
+			DPRINT("Authentication by public key failed.\n");
+			goto shutdown;
+		} else {
+			DPRINT("Authentication by public key succeeded.\n");
+		}
+	} else {
+		DPRINT("No supported authentication methods found.\n");
+		goto shutdown;
+	}
+
+
 	return;
 
   shutdown:;
@@ -167,9 +280,9 @@ auth_ssh2(FFid *f) {
 	}
 
 	if(session != NULL) {
-        libssh2_session_disconnect(session, "Normal Shutdown");
-        libssh2_session_free(session);
-    }
+		libssh2_session_disconnect(session, "Normal Shutdown");
+		libssh2_session_free(session);
+	}
 
 	close(ssh_sock);
 	libssh2_exit();

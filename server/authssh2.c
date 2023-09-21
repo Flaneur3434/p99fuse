@@ -236,15 +236,18 @@ ssh2read(Fcall *rx, Fcall *tx) {
 	switch(session->cli_mesg_state) {
 	case ServerInfo: {
 		// send ip and port as one string
-		const int max_mesg_len =
-			strnlen(sp->server_ip, INET6_ADDRSTRLEN)
-			+ 1
-			+ strnlen(sp->listening_port, 6)
-			+ 1
-			+ 1;
-
+		const int max_mesg_len = 128;
 		char mesg[max_mesg_len];
-		snprintf(mesg, max_mesg_len, "%s:%s:", session->server_ip, session->listening_port);
+		/*
+		 * message structure
+		 * [1] ip
+		 * [2] port
+		 * [3] authentication method
+		 *     key   - publickey
+		 *     pass  - password
+		 *     none  - none
+		 */
+		snprintf(mesg, max_mesg_len, "%s:%s:%s:", session->server_ip, session->listening_port, "key");
 
 		readstr(rx, tx, mesg, strnlen(mesg, max_mesg_len));
 
