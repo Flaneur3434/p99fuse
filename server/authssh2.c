@@ -1,6 +1,5 @@
 #pragma once
 
-#include <libssh2.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -337,18 +336,6 @@ get_password(char *password)
     tcsetattr(STDIN_FILENO, TCSANOW, &old_terminal);
 }
 
-static void
-server_ssh_session_init(Ssh2Session *this) {
-	getlogin_r(this->username, 30);
-
-	const int pubkey_size = 64;
-	const int privkey_size = 64;
-
-	snprintf(this->pubkey, pubkey_size, "/home/%s/.ssh/id_rsa.pub", this->username);
-	snprintf(this->privkey, privkey_size, "/home/%s/.ssh/id_rsa", this->username);
-}
-
-
 /*
  * Accept new connection from ssh server and comfirm authentication
  * Clean up after your self
@@ -358,31 +345,11 @@ static char*
 ssh2attach(Fcall *rx, Fcall *tx)
 {
 	Ssh2Session *sp;
-	char *auth_error_mesg = NULL;
-	int ssh_auth_fd = -1;
-
-
-	// setup ssh forwarding listener
-	int rc = 0; // error value
-
-	LIBSSH2_SESSION *ssh_session = NULL;
-	LIBSSH2_LISTENER *listener = NULL;
-    LIBSSH2_CHANNEL *channel = NULL;
-
-	struct addrinfo *p = NULL;
-	int yes = 1;
-
-	libssh2_socket_t ssh_sock = -1; // ssh handshake socket
-
-	enum {
-		AUTH_NONE = 0,
-		AUTH_PASSWORD = 1,
-		AUTH_PUBLICKEY = 2
-	};
-
-	const char *auth_method = "key";
-
 	char *ep;
+
+	char *auth_error_mesg = NULL;
+	int forward_sock = -1;
+
 	Fid *f = oldauthfid(rx->afid, (void **)&sp, &ep);
 	if (f == nil) {
 		auth_error_mesg = ep;
@@ -393,151 +360,18 @@ ssh2attach(Fcall *rx, Fcall *tx)
 		fprint(2, "ssh2attach: afid %d state %d\n", rx->afid, sp->cli_mesg_state);
 	}
 
-	rc = libssh2_init(0);
-	if(rc) {
-        fprint(2, "libssh2 initialization failed (%d)\n", rc);
-        return "libssh2 initialization failed";
-    }
-
-	/* Connect to SSH server */
-    ssh_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if(ssh_sock == LIBSSH2_INVALID_SOCKET) {
-        fprintf(stderr, "failed to open socket.\n");
-        goto shutdown;
-    }
-
-    struct sockaddr_in sin;
-	sin.sin_family = AF_INET;
-    sin.sin_addr.s_addr = inet_addr(sp->server_ip);
-    if(INADDR_NONE == sin.sin_addr.s_addr) {
-        fprintf(stderr, "inet_addr: Invalid IP address '%s'\n", sp->server_ip);
-        goto shutdown;
-    }
-
-	// connect to ssh server port 22
-    sin.sin_port = htons(22);
-    if(connect(ssh_sock, (struct sockaddr*)(&sin), sizeof(struct sockaddr_in))) {
-        fprintf(stderr, "Failed to connect to %s.\n", inet_ntoa(sin.sin_addr));
-        goto shutdown;
-    }
-
-	// Create a session instance
-	ssh_session = libssh2_session_init();
-    if(ssh_session == NULL) {
-        fprint(2, "could not initialize SSH session\n");
-        goto shutdown;
-    }
-
-	/* ... start it up. This will trade welcome banners, exchange keys,
-     * and setup crypto, compression, and MAC layers
-     */
-	rc = libssh2_session_handshake(ssh_session, ssh_sock);
-    if(rc) {
-        fprint(2, "error when starting up SSH session: %d\n", rc);
-        goto shutdown;
-    }
-
-	/* At this point we have not yet authenticated. The first thing to do is
-     * check the hostkey's fingerprint against our known hosts
-	 */
-	const char *fingerprint = libssh2_hostkey_hash(ssh_session, LIBSSH2_HOSTKEY_HASH_SHA1);
-	if (compare_known_hosts(fingerprint) == false) {
-        fprint(2, "host fingerprint does not match any hosts in known_hosts\n");
-		goto shutdown;
-	}
-
-	server_ssh_session_init(sp);
-
-	// check what authentication methods are available
-    char *userauthlist = libssh2_userauth_list(ssh_session, sp->username, (unsigned int)strlen(sp->username));
-	if(userauthlist == NULL) {
-		fprint(2, "No authentication method found\n");
-		goto shutdown;
-	}
-
-	// set available auth methods
-	int auth = AUTH_NONE;
-	if(strstr(userauthlist, "password")) {
-		auth |= AUTH_PASSWORD;
-	}
-	if(strstr(userauthlist, "publickey")) {
-		auth |= AUTH_PUBLICKEY;
-	}
-
-	// set auth method to the one server requested
-	if(((auth & AUTH_PASSWORD) == AUTH_PASSWORD) && (strcmp(auth_method, "int") == 0)) {
-		auth = AUTH_PASSWORD;
-	} else if(((auth & AUTH_PUBLICKEY) == AUTH_PUBLICKEY) && (strcmp(auth_method, "key") == 0)) {
-		auth = AUTH_PUBLICKEY;
-	} else {
-		auth = AUTH_NONE;
-	}
-
-	if((auth & AUTH_PASSWORD) == AUTH_PASSWORD) {
-		puts("Insert ssh login password:");
-		get_password(sp->password);
-		if(libssh2_userauth_password(ssh_session, sp->username, sp->password)) {
-			fprint(2, "Authentication by password failed.\n");
-			goto shutdown;
-		} else {
-			fprint(2, "Authentication by paswword succeeded.\n");
-		}
-	} else if((auth & AUTH_PUBLICKEY) == AUTH_PUBLICKEY) {
-		if(libssh2_userauth_publickey_fromfile(ssh_session, sp->username, sp->pubkey, sp->privkey, NULL)) {
-			fprint(2, "Authentication by public key failed.\n");
-			goto shutdown;
-		} else {
-			fprint(2, "Authentication by public key succeeded.\n");
-		}
-	} else {
-		fprint(2, "No supported authentication methods found.\n");
-		goto shutdown;
-	}
-
-	return nil;
-
-	// Create a channel that connects to the ssh server using the port opened by client for forwarding
-	libssh2_socket_t listening_port = atoi(sp->ssh_channel_writing_port);
-	listener = libssh2_channel_forward_listen_ex(ssh_session, sp->server_ip, listening_port, 0, 1);
-	if(listener == NULL) {
-        fprint(2, "Could not start the tcpip-forward listener.\n"
-                        "(Note that this can be a problem at the server."
-                        " Please review the server logs.)\n");
-        goto shutdown;
-    }
-
-	// Accept a queued connection
-	channel = libssh2_channel_forward_accept(listener);
-	if(channel == NULL) {
-        fprint(2, "Could not accept connection.\n"
-                        "(Note that this can be a problem at the server."
-                        " Please review the server logs.)\n");
-        goto shutdown;
-    }
-
-	// Must use non-blocking IO hereafter due to the current libssh2 API
-	libssh2_session_set_blocking(ssh_session, 0);
-
-
-
-
-
-
-
-
-
 	char auth_buffer[20];
 	switch(sp->cli_mesg_state) {
 	case ServerStatus: {
 		struct sockaddr_storage ssh_server_addr;
 		socklen_t ssh_server_addr_size = sizeof ssh_server_addr;
-		ssh_auth_fd = accept(sp->listening_sock, (struct sockaddr *)&ssh_server_addr, &ssh_server_addr_size);
-		if (ssh_auth_fd == -1) {
+		forward_sock = accept(sp->listening_sock, (struct sockaddr *)&ssh_server_addr, &ssh_server_addr_size);
+		if (forward_sock == -1) {
 			auth_error_mesg = strerror(errno);
             goto shutdown;
         }
 
-		rc = recv(ssh_auth_fd, auth_buffer, sizeof auth_buffer, 0);
+		int rc = recv(forward_sock, auth_buffer, sizeof auth_buffer, 0);
 
 		if (rc == -1) {
 			auth_error_mesg = strerror(errno);
@@ -565,32 +399,17 @@ ssh2attach(Fcall *rx, Fcall *tx)
 	}
 
   shutdown:; // empty statement cause C is wack yo
-
-	if(channel != NULL) {
-		libssh2_channel_free(channel);
-	}
-
-	if (listener != NULL) {
-		libssh2_channel_forward_cancel(listener);
-	}
-
-	if(ssh_session != NULL) {
-		libssh2_session_disconnect(ssh_session, "Normal Shutdown");
-		libssh2_session_free(ssh_session);
-	}
-
 	if (sp->listening_sock != -1) {
 		close(sp->listening_sock);
 	}
 
-	if (ssh_auth_fd != -1) {
-		close(ssh_auth_fd);
+	if (forward_sock != -1) {
+		close(forward_sock);
 	}
 
-	// TODO: probably missing more socks to close ....
+	// TODO_: probably missing more socks to close ....
 
 	free(sp);
-	libssh2_exit();
 	return auth_error_mesg;
 }
 

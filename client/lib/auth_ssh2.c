@@ -1,5 +1,6 @@
 #include <libssh2.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <ifaddrs.h>
@@ -164,7 +165,7 @@ auth_ssh2(FFid *f) {
         return;
     }
 
-	// boiler plate to set up remote connection
+	// boiler plate to set up remote connection to ssh server
 	struct addrinfo hints, *servinfo;
 	memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
@@ -272,62 +273,67 @@ auth_ssh2(FFid *f) {
 		goto shutdown;
 	}
 
-	// Instruct the remote SSH server to begin listening for inbound TCP/IP connections.
-	listener = libssh2_channel_forward_listen_ex(session, server_ip_addr, 0, &remote_ssh_bound_port, 1);
-	if(listener == NULL) {
-        DPRINT("Could not start the tcpip-forward listener.\n"
-                        "(Note that this can be a problem at the server."
-                        " Please review the server logs.)\n");
-        goto shutdown;
-    }
-
 	// send listening channel information to u9fs server
 	sprintf(buf, "%d", remote_ssh_bound_port);
 	_9pwrite(f, buf, sizeof(char) * strlen(buf));
 
+	// boiler plate to set up port used for direct forwarding
+	char shost[INET6_ADDRSTRLEN];
+	unsigned int sport = -1;
 
-	return;
+	memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
 
+	if ((rc = getaddrinfo(server_ip_addr, NULL, &hints, &servinfo)) != 0) {
+        DPRINT("getaddrinfo: %s\n", gai_strerror(rc));
+        return;
+    }
 
-	// Accept a queued connection
-	channel = libssh2_channel_forward_accept(listener);
-	if(channel == NULL) {
-        DPRINT("Could not accept connection.\n"
-                        "(Note that this can be a problem at the server."
-                        " Please review the server logs.)\n");
+	// loop through all the results and bind to the first we can
+    for(p = servinfo; p != NULL; p = p->ai_next) {
+		struct sockaddr *addr = p->ai_addr;
+		if (p->ai_family == AF_INET) {
+			inet_ntop(p->ai_family, &((struct sockaddr_in *)addr)->sin_addr, shost, sizeof shost);
+		} else {
+			inet_ntop(p->ai_family, &((struct sockaddr_in6 *)addr)->sin6_addr, shost, sizeof shost);
+		}
+
+		sport = htons(p->ai_family == AF_INET ?
+					  ((struct sockaddr_in *)addr)->sin_port:
+					  ((struct sockaddr_in6 *)addr)->sin6_port);
+
+        break;
+    }
+
+    freeaddrinfo(servinfo); // all done with this structure
+	servinfo = NULL;
+
+	if (p == NULL)  {
+        DPRINT("server: failed to bind\n");
         goto shutdown;
     }
 
-	// setup connection to remote 9p server
-	forwarding_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if(forwarding_sock == LIBSSH2_INVALID_SOCKET) {
-        DPRINT("failed to open forward socket.\n");
-        goto shutdown;
-    }
+	channel = libssh2_channel_direct_tcpip_ex(session, server_ip_addr, atoi(server_port), shost, sport);
+	if (channel == NULL) {
+		DPRINT("Could not open the direct-tcpip channel.\n"
+			   "(Note that this can be a problem at the server."
+			   " Please review the server logs.)\n");
+		goto shutdown;
+	}
 
-	struct sockaddr_in sin;
-	sin.sin_family = AF_INET; // only ipv4 wwwwwww
-    sin.sin_port = htons(atoi(server_port));
-    sin.sin_addr.s_addr = inet_addr(server_ip_addr);
-    if(sin.sin_addr.s_addr == INADDR_NONE) {
-        DPRINT("failed in inet_addr().\n");
-        goto shutdown;
-    }
-    if(connect(forwarding_sock, (struct sockaddr *)&sin, sizeof sin) == -1) {
-		perror("client: connect");
-        goto shutdown;
-    }
-
-	/* Must use non-blocking IO hereafter due to the current libssh2 API */
+	// Must use non-blocking IO hereafter due to the current libssh2 API
     libssh2_session_set_blocking(session, 0);
 
 
 
+	// TEST
+
+	const char *signal = "FAIL";
+	libssh2_channel_write(channel, signal, strlen(signal));
 
 
-
-
-
+	// TSET
 
   shutdown:;
 	if (servinfo != NULL) {
