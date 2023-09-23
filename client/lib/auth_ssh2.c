@@ -7,7 +7,6 @@
 #include <net/if.h>
 #include <linux/if_link.h>
 #include <unistd.h>
-#include <errno.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -244,7 +243,7 @@ auth_ssh2(FFid *f) {
 	}
 
 	// set auth method to the one server requested
-	if(((auth & AUTH_PASSWORD) == AUTH_PASSWORD) && (strcmp(auth_method, "int") == 0)) {
+	if(((auth & AUTH_PASSWORD) == AUTH_PASSWORD) && (strcmp(auth_method, "pass") == 0)) {
 		auth = AUTH_PASSWORD;
 	} else if(((auth & AUTH_PUBLICKEY) == AUTH_PUBLICKEY) && (strcmp(auth_method, "key") == 0)) {
 		auth = AUTH_PUBLICKEY;
@@ -323,13 +322,13 @@ auth_ssh2(FFid *f) {
 	}
 
 	// Must use non-blocking IO hereafter due to the current libssh2 API
-    libssh2_session_set_blocking(session, 0);
+    // libssh2_session_set_blocking(session, 0);
 
 
 
 	// TEST
 
-	const char *signal = "FAIL";
+	const char *signal = "SUCC";
 	libssh2_channel_write(channel, signal, strlen(signal));
 
 

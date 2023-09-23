@@ -259,7 +259,7 @@ ssh2read(Fcall *rx, Fcall *tx) {
 		 *     pass  - password
 		 *     none  - none
 		 */
-		snprintf(mesg, max_mesg_len, "%s:%s:%s:", session->server_ip, session->ssh_channel_listening_port, "key");
+		snprintf(mesg, max_mesg_len, "%s:%s:%s:", session->server_ip, session->ssh_channel_listening_port, "pass");
 
 		readstr(rx, tx, mesg, strnlen(mesg, max_mesg_len));
 
