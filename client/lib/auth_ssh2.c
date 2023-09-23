@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
 #include <termios.h>
 
@@ -144,12 +145,17 @@ auth_ssh2(FFid *f) {
 	int rc = 0; // error value
 
 	LIBSSH2_SESSION *session = NULL;
+	LIBSSH2_LISTENER *listener = NULL;
+    LIBSSH2_CHANNEL *channel = NULL;
 
 	struct addrinfo *p = NULL;
 	libssh2_socket_t ssh_sock = -1;
 	int yes = 1;
 
+	libssh2_socket_t remote_ssh_bound_port = LIBSSH2_INVALID_SOCKET;
+	libssh2_socket_t forwarding_sock = LIBSSH2_INVALID_SOCKET;
 
+	// ----
 
 	// ssh connection setup
 	rc = libssh2_init(0);
@@ -178,7 +184,6 @@ auth_ssh2(FFid *f) {
         }
 
         if (connect(ssh_sock, p->ai_addr, p->ai_addrlen) == -1) {
-            close(ssh_sock);
             perror("client: connect");
             continue;
         }
@@ -256,11 +261,7 @@ auth_ssh2(FFid *f) {
 			DPRINT("Authentication by paswword succeeded.\n");
 		}
 	} else if((auth & AUTH_PUBLICKEY) == AUTH_PUBLICKEY) {
-		if(libssh2_userauth_publickey_fromfile(session,
-											   sys_info.username,
-											   sys_info.pubkey,
-											   sys_info.privkey,
-											   NULL)) {
+		if(libssh2_userauth_publickey_fromfile(session, sys_info.username, sys_info.pubkey, sys_info.privkey, NULL)) {
 			DPRINT("Authentication by public key failed.\n");
 			goto shutdown;
 		} else {
@@ -271,12 +272,74 @@ auth_ssh2(FFid *f) {
 		goto shutdown;
 	}
 
+	// Instruct the remote SSH server to begin listening for inbound TCP/IP connections.
+	listener = libssh2_channel_forward_listen_ex(session, server_ip_addr, 0, &remote_ssh_bound_port, 1);
+	if(listener == NULL) {
+        DPRINT("Could not start the tcpip-forward listener.\n"
+                        "(Note that this can be a problem at the server."
+                        " Please review the server logs.)\n");
+        goto shutdown;
+    }
+
+	// send listening channel information to u9fs server
+	sprintf(buf, "%d", remote_ssh_bound_port);
+	_9pwrite(f, buf, sizeof(char) * strlen(buf));
+
 
 	return;
+
+
+	// Accept a queued connection
+	channel = libssh2_channel_forward_accept(listener);
+	if(channel == NULL) {
+        DPRINT("Could not accept connection.\n"
+                        "(Note that this can be a problem at the server."
+                        " Please review the server logs.)\n");
+        goto shutdown;
+    }
+
+	// setup connection to remote 9p server
+	forwarding_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if(forwarding_sock == LIBSSH2_INVALID_SOCKET) {
+        DPRINT("failed to open forward socket.\n");
+        goto shutdown;
+    }
+
+	struct sockaddr_in sin;
+	sin.sin_family = AF_INET; // only ipv4 wwwwwww
+    sin.sin_port = htons(atoi(server_port));
+    sin.sin_addr.s_addr = inet_addr(server_ip_addr);
+    if(sin.sin_addr.s_addr == INADDR_NONE) {
+        DPRINT("failed in inet_addr().\n");
+        goto shutdown;
+    }
+    if(connect(forwarding_sock, (struct sockaddr *)&sin, sizeof sin) == -1) {
+		perror("client: connect");
+        goto shutdown;
+    }
+
+	/* Must use non-blocking IO hereafter due to the current libssh2 API */
+    libssh2_session_set_blocking(session, 0);
+
+
+
+
+
+
+
+
 
   shutdown:;
 	if (servinfo != NULL) {
 		freeaddrinfo(servinfo);
+	}
+
+	if(channel != NULL) {
+		libssh2_channel_free(channel);
+	}
+
+	if (listener != NULL) {
+		libssh2_channel_forward_cancel(listener);
 	}
 
 	if(session != NULL) {
@@ -284,8 +347,16 @@ auth_ssh2(FFid *f) {
 		libssh2_session_free(session);
 	}
 
-	close(ssh_sock);
-	libssh2_exit();
+	if (ssh_sock != LIBSSH2_INVALID_SOCKET) {
+		shutdown(ssh_sock, 2);
+		close(ssh_sock);
+	}
 
+	if (forwarding_sock != LIBSSH2_INVALID_SOCKET) {
+		shutdown(forwarding_sock, 2);
+		close(forwarding_sock);
+	}
+
+	libssh2_exit();
 	return;
 }
